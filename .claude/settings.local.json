@@ -2,16 +2,10 @@
   "permissions": {
     "allow": [
       "Bash(pip list *)",
-      "Bash(export DATABENTO_API_KEY=\"db-x6L8rTUswRkJk87hMr8NCpETFEUTi\")",
-      "Bash(python3 /tmp/claude-82915/-home-43e3-solr-home-GC/793a7248-f327-4efc-b9a5-da404a03bf82/scratchpad/db_check.py)",
-      "Bash(python3 /tmp/claude-82915/-home-43e3-solr-home-GC/793a7248-f327-4efc-b9a5-da404a03bf82/scratchpad/db_sample.py)",
-      "Bash(python3 /tmp/claude-82915/-home-43e3-solr-home-GC/793a7248-f327-4efc-b9a5-da404a03bf82/scratchpad/db_submit_batch.py)",
-      "Bash(python3 -u /tmp/claude-82915/-home-43e3-solr-home-GC/793a7248-f327-4efc-b9a5-da404a03bf82/scratchpad/db_watch_download.py)",
       "WebFetch(domain:databento.com)",
       "WebFetch(domain:raw.githubusercontent.com)",
       "WebSearch",
       "Bash(python3 *)",
-      "Bash(export DATABENTO_API_KEY=\"db-itutggqviDu7rbjG8sRUDeqKTRsDy\")",
       "Bash(awk -F'cost_usd=' '{s+=$2; n++} END {printf \"jobs with cost: %d, TOTAL $%.2f\\\\n\", n, s}')"
     ]
   }
