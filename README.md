@@ -1,0 +1,139 @@
+# GC Futures Order-Flow AI System
+
+Machine-learning trading research system for **COMEX Gold futures (GC)**, built
+on full-depth market-by-order (MBO) data. The system reconstructs the limit
+order book from raw exchange events, derives order-flow features, and trains a
+multi-task quantile model to forecast short-horizon price behaviour — with one
+identical code path for historical research and live operation.
+
+- **Data**: Databento, dataset `GLBX.MDP3`, schema `mbo`, symbol `GC.FUT` (parent)
+- **Specification**: [`gc_orderflow_plan_v2.md`](gc_orderflow_plan_v2.md) (v2.5) — the
+  authoritative working plan. Read it before changing anything.
+- **Language**: Python + a compiled performance core (Rust/PyO3 or Cython) for the
+  book engine.
+
+---
+
+## Current status (2026-07-07)
+
+| Milestone | Status |
+|---|---|
+| Raw MBO archive 2017-05-21 → 2026-03-31 | ✅ Complete — 2,774 daily files, ~113 GB compressed |
+| Archive consolidated into one folder (`data/raw_mbo/daily/`) | ✅ Done |
+| Known gaps documented | ✅ [`data/raw_mbo/KNOWN_GAPS.md`](data/raw_mbo/KNOWN_GAPS.md) |
+| April 2026+ backfill, MBP-10 verification days | ⏳ Not yet purchased |
+| Raw archive set read-only | ⏳ Pending |
+| Step 2 formal inventory audit (quality mask, roll ledger) | ⏳ Next up |
+| Book engine / features / models | ⏳ Not started |
+
+## Repository layout
+
+```
+GC/
+├── README.md                     ← you are here
+├── gc_orderflow_plan_v2.md       ← full project specification (v2.5)
+├── data/
+│   └── raw_mbo/
+│       ├── daily/                ← THE archive: one .dbn.zst file per day
+│       │   └── glbx-mdp3-YYYYMMDD.mbo.dbn.zst   (2,774 files)
+│       ├── job_metadata/         ← Databento batch-job reports (manifest,
+│       │   └── GLBX-*/              condition, metadata) — provenance record
+│       ├── KNOWN_GAPS.md         ← authoritative gap & degraded-day list
+│       └── download_archive.log  ← full download history
+├── keys/                         ← Databento API keys (key-N.txt) + .done markers
+└── scripts/
+    └── download_archive.py       ← sequential batch downloader (restartable)
+```
+
+## The data
+
+**2,774 daily files spanning 2017-05-21 → 2026-03-31** (every CME Globex
+session; Saturdays have no session). Format is exactly as delivered by
+Databento: **DBN + zstd** (`.dbn.zst`) — lossless int64 fixed-point prices,
+nanosecond timestamps, order IDs, sequence numbers, and flags preserved. Files
+are never decompressed to disk; read them directly:
+
+```python
+import databento as db
+store = db.DBNStore.from_file("data/raw_mbo/daily/glbx-mdp3-20240102.mbo.dbn.zst")
+for record in store:
+    ...
+```
+
+### Known holes — read before processing
+
+- **2020-02-28 is missing and unrecoverable** (Databento has zero MBO data for
+  this session; peak COVID crash). Per plan rule R10 it is quarantined, never
+  patched: keep it in the quality mask and never let rolling-window state span
+  2020-02-27 → 2020-03-01.
+- **16 degraded-but-delivered days** (Databento `condition != available`) exist
+  and decode fine but must be flagged in the quality mask. Full list in
+  [`KNOWN_GAPS.md`](data/raw_mbo/KNOWN_GAPS.md).
+
+### Frozen chronological split (do not change)
+
+| Split | Period |
+|---|---|
+| Train | 2017 – 2023 (COVID stratum tagged) |
+| Validate | 2024 |
+| Test | 2025 |
+| Final holdout | Q1 2026 — touch once, at the very end |
+
+## Downloading / backfilling data
+
+`scripts/download_archive.py` downloads via Databento batch jobs, one API key
+at a time. Key files live in `keys/key-N.txt`:
+
+```
+line 1: db-XXXXXXXXXXXXXXXXXXXXXXXXXXXXX      ← API key
+line 2: 2022-07-31 to 2023-06-30              ← date range (order-insensitive)
+```
+
+Behaviour: submits the job, polls until packaged, downloads all daily files,
+then **verifies** (manifest sizes, calendar completeness, decode test) and
+writes `keys/.done/key-N.done`. Re-running skips finished keys, so the script
+is safely restartable after any failure.
+
+> ⚠️ The script predates the consolidated layout: it downloads into a
+> `data/raw_mbo/<JOB-ID>/` directory. After a new download completes, move the
+> daily files into `daily/` and the JSON reports into `job_metadata/<JOB-ID>/`
+> (or update the script first). Update `KNOWN_GAPS.md` after any backfill.
+
+Archive cost: $423.92 across the 8 jobs in `download_archive.log`, plus two
+earlier jobs (2024-05-31 → 2026-03-31 ranges) downloaded before that log began —
+roughly $550 total for the full archive.
+
+## Hardware profile (target machine)
+
+Single Linux workstation: AMD Ryzen 9 3900X (12c/24t), 64 GB RAM, RTX 2080
+SUPER 8 GB, NVMe fast tier + `/home` SATA capacity tier. Consequences:
+
+- Raw archive lives on `/home` (capacity tier), immutable after audit.
+- Processed Parquet, labels, and model artifacts go to NVMe. Nothing hot on CIFS.
+- Historical batch processing: ~10 worker processes, one session per worker.
+- Model training: mixed precision, gradient accumulation; 8 GB VRAM is the
+  model-capacity ceiling (which enforces the R5 effective-sample-size discipline).
+
+## Build order (from the plan — abbreviated)
+
+1. **Step 0–2**: performance-architecture decision (compiled book engine),
+   inventory audit of the raw archive, quality mask, contract-roll ledger.
+2. **Phases 1–3**: MBO data engine → order-lifecycle/queue engine → core
+   order-flow features. Throughput gates: ≥200k events/s sustained replay,
+   ≥500k events/s burst, byte-identical replay determinism (CI test).
+3. **Phases 4–6**: normalization architecture (σ_h / v_scale / d_scale),
+   economic calendar, model inputs, training samples.
+4. **Go/no-go gate**, then **Phases 7–9**: labels (volatility-normalized,
+   tradeable-price), multi-task quantile model, purged validation.
+5. **Phases 10–11**: live system, execution and policy layer, monitoring.
+
+## Non-negotiable rules (highlights)
+
+- **One code path** for historical and live processing — no vectorized-historical
+  vs. streaming-live split, ever (Critical Rule 3 / risk R3).
+- **Determinism**: same input file ⇒ byte-identical output, twice.
+- **Raw data is immutable**: `.dbn.zst` files are kept exactly as delivered.
+- **Never patch data holes** — quarantine and mask them (R10).
+- **The Q1 2026 holdout is sacred** — evaluated once, at the end (R7).
+- Risks R1–R3 (book-reconstruction bugs, future leakage, train/serve skew)
+  outrank all other work. See Appendix A of the plan.

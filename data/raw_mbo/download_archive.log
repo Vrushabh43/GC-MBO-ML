@@ -1,0 +1,94 @@
+[2026-07-06 23:09:53] ======================================================================
+[2026-07-06 23:09:53] Starting sequential archive download for keys 1..8.
+[2026-07-06 23:09:53] key-1: range 2023-07-01 .. 2024-05-30 (inclusive); requesting end=2024-05-31 exclusive.
+[2026-07-06 23:09:56] key-1: estimated cost $58.44, 34.9 GB uncompressed.
+[2026-07-06 23:09:59] key-1: submitted job GLBX-20260706-PYGQH4FVAL, state=queued.
+[2026-07-06 23:32:11] key-1: job done. records=622549165 cost_usd=58.44324439018965
+[2026-07-06 23:36:52] key-1: downloaded 290 files to /home/43e3/solr-home/GC/data/raw_mbo/GLBX-20260706-PYGQH4FVAL/.
+[2026-07-06 23:36:52] key-1: VERIFIED OK -- 287 daily files, 2023-07-01..2024-05-30.
+[2026-07-06 23:36:52] key-2: range 2022-07-31 .. 2023-06-30 (inclusive); requesting end=2023-07-01 exclusive.
+[2026-07-06 23:36:53] key-2: cost/metadata check FAILED: 403 auth_account_locked
+Your account has been locked for security reasons.
+documentation: https://databento.com/docs -- skipping this key.
+[2026-07-06 23:36:53] key-3: range 2021-08-31 .. 2022-07-30 (inclusive); requesting end=2022-07-31 exclusive.
+[2026-07-06 23:36:55] key-3: estimated cost $46.11, 27.5 GB uncompressed.
+[2026-07-06 23:36:56] key-3: submitted job GLBX-20260706-SP6EVP5UDX, state=queued.
+[2026-07-06 23:57:12] key-3: job done. records=491159937 cost_usd=46.10877637714148
+[2026-07-07 00:00:54] key-3: downloaded 289 files to /home/43e3/solr-home/GC/data/raw_mbo/GLBX-20260706-SP6EVP5UDX/.
+[2026-07-07 00:00:54] key-3: VERIFIED OK -- 286 daily files, 2021-08-31..2022-07-30.
+[2026-07-07 00:00:54] key-4: range 2020-10-01 .. 2021-08-30 (inclusive); requesting end=2021-08-31 exclusive.
+[2026-07-07 00:00:56] key-4: estimated cost $52.43, 31.3 GB uncompressed.
+[2026-07-07 00:00:58] key-4: submitted job GLBX-20260706-3QK6DSQWVC, state=queued.
+[2026-07-07 00:21:05] key-4: job done. records=558543329 cost_usd=52.43454832881689
+[2026-07-07 00:25:30] key-4: downloaded 289 files to /home/43e3/solr-home/GC/data/raw_mbo/GLBX-20260706-3QK6DSQWVC/.
+[2026-07-07 00:25:30] key-4: VERIFIED OK -- 286 daily files, 2020-10-01..2021-08-30.
+[2026-07-07 00:25:30] key-5: range 2019-10-31 .. 2020-09-30 (inclusive); requesting end=2020-10-01 exclusive.
+[2026-07-07 00:25:32] key-5: estimated cost $57.90, 34.5 GB uncompressed.
+[2026-07-07 00:25:33] key-5: submitted job GLBX-20260706-GQMR98A7SL, state=queued.
+[2026-07-07 00:47:40] key-5: job done. records=616712278 cost_usd=57.89529310762882
+[2026-07-07 00:52:42] key-5: downloaded 290 files to /home/43e3/solr-home/GC/data/raw_mbo/GLBX-20260706-GQMR98A7SL/.
+[2026-07-07 00:52:42] key-5: VERIFICATION PROBLEMS (287 files): ["absent non-Saturday days: ['2020-02-28']"]
+[2026-07-07 00:52:42] key-6: range 2018-12-01 .. 2019-10-30 (inclusive); requesting end=2019-10-31 exclusive.
+[2026-07-07 00:52:44] key-6: estimated cost $53.79, 32.1 GB uncompressed.
+[2026-07-07 00:52:49] key-6: submitted job GLBX-20260706-DX4WRTG395, state=queued.
+[2026-07-07 01:14:55] key-6: job done. records=573034914 cost_usd=53.79497942626476
+[2026-07-07 01:19:11] key-6: downloaded 289 files to /home/43e3/solr-home/GC/data/raw_mbo/GLBX-20260706-DX4WRTG395/.
+[2026-07-07 01:19:11] key-6: VERIFIED OK -- 286 daily files, 2018-12-01..2019-10-30.
+[2026-07-07 01:19:11] key-7: range 2017-12-31 .. 2018-11-30 (inclusive); requesting end=2018-12-01 exclusive.
+[2026-07-07 01:19:11] key-7: cost/metadata check FAILED: 403 auth_account_locked
+Your account has been locked for security reasons.
+documentation: https://databento.com/docs -- skipping this key.
+[2026-07-07 01:19:11] key-8: range 2017-05-21 .. 2017-12-30 (inclusive); requesting end=2017-12-31 exclusive.
+[2026-07-07 01:19:24] key-8: estimated cost $34.29, 20.5 GB uncompressed.
+[2026-07-07 01:19:31] key-8: submitted job GLBX-20260706-836XTQ3DJV, state=queued.
+[2026-07-07 01:35:51] key-8: job done. records=365215630 cost_usd=34.28546293079853
+[2026-07-07 01:38:33] key-8: downloaded 195 files to /home/43e3/solr-home/GC/data/raw_mbo/GLBX-20260706-836XTQ3DJV/.
+[2026-07-07 01:38:33] key-8: VERIFIED OK -- 192 daily files, 2017-05-21..2017-12-30.
+[2026-07-07 01:38:33] ----------------------------------------------------------------------
+[2026-07-07 01:38:33] FINAL SUMMARY: {1: 'OK', 2: 'FAILED', 3: 'OK', 4: 'OK', 5: 'FAILED', 6: 'OK', 7: 'FAILED', 8: 'OK'}
+[2026-07-07 01:38:33] COMBINED ARCHIVE: 2198 daily files, 2017-05-21 .. 2026-03-31, duplicates=none
+[2026-07-07 01:38:33] ALL DONE.
+[2026-07-07 19:08:29] ======================================================================
+[2026-07-07 19:08:29] Starting sequential archive download for keys 1..8.
+[2026-07-07 19:08:29] key-1: already done (marker present), skipping.
+[2026-07-07 19:08:29] key-2: range 2022-07-31 .. 2023-06-30 (inclusive); requesting end=2023-07-01 exclusive.
+[2026-07-07 19:08:30] key-2: cost/metadata check FAILED: 403 auth_account_locked
+Your account has been locked for security reasons.
+documentation: https://databento.com/docs -- skipping this key.
+[2026-07-07 19:08:30] key-3: already done (marker present), skipping.
+[2026-07-07 19:08:30] key-4: already done (marker present), skipping.
+[2026-07-07 19:08:30] key-5: already done (marker present), skipping.
+[2026-07-07 19:08:30] key-6: already done (marker present), skipping.
+[2026-07-07 19:08:30] key-7: range 2017-12-31 .. 2018-11-30 (inclusive); requesting end=2018-12-01 exclusive.
+[2026-07-07 19:08:33] key-7: cost/metadata check FAILED: 403 auth_account_locked
+Your account has been locked for security reasons.
+documentation: https://databento.com/docs -- skipping this key.
+[2026-07-07 19:08:33] key-8: already done (marker present), skipping.
+[2026-07-07 19:08:33] ----------------------------------------------------------------------
+[2026-07-07 19:08:33] FINAL SUMMARY: {1: 'OK', 2: 'FAILED', 3: 'OK', 4: 'OK', 5: 'OK', 6: 'OK', 7: 'FAILED', 8: 'OK'}
+[2026-07-07 19:08:33] COMBINED ARCHIVE: 2198 daily files, 2017-05-21 .. 2026-03-31, duplicates=none
+[2026-07-07 19:08:33] ALL DONE.
+[2026-07-07 19:12:51] ======================================================================
+[2026-07-07 19:12:51] Starting sequential archive download for keys 1..8.
+[2026-07-07 19:12:51] key-1: already done (marker present), skipping.
+[2026-07-07 19:12:51] key-2: range 2022-07-31 .. 2023-06-30 (inclusive); requesting end=2023-07-01 exclusive.
+[2026-07-07 19:13:01] key-2: estimated cost $62.60, 37.3 GB uncompressed.
+[2026-07-07 19:13:02] key-2: submitted job GLBX-20260707-8VGRQV6KKV, state=queued.
+[2026-07-07 19:39:58] key-2: job done. records=666792294 cost_usd=62.59667057096958
+[2026-07-07 19:45:13] key-2: downloaded 291 files to /home/43e3/solr-home/GC/data/raw_mbo/GLBX-20260707-8VGRQV6KKV/.
+[2026-07-07 19:45:13] key-2: VERIFIED OK -- 288 daily files, 2022-07-31..2023-06-30.
+[2026-07-07 19:45:13] key-3: already done (marker present), skipping.
+[2026-07-07 19:45:13] key-4: already done (marker present), skipping.
+[2026-07-07 19:45:13] key-5: already done (marker present), skipping.
+[2026-07-07 19:45:13] key-6: already done (marker present), skipping.
+[2026-07-07 19:45:13] key-7: range 2017-12-31 .. 2018-11-30 (inclusive); requesting end=2018-12-01 exclusive.
+[2026-07-07 19:45:22] key-7: estimated cost $58.36, 34.8 GB uncompressed.
+[2026-07-07 19:45:23] key-7: submitted job GLBX-20260707-WHQCUMJE3H, state=queued.
+[2026-07-07 20:09:43] key-7: job done. records=621659054 cost_usd=58.35968315899372
+[2026-07-07 20:14:16] key-7: downloaded 291 files to /home/43e3/solr-home/GC/data/raw_mbo/GLBX-20260707-WHQCUMJE3H/.
+[2026-07-07 20:14:16] key-7: VERIFIED OK -- 288 daily files, 2017-12-31..2018-11-30.
+[2026-07-07 20:14:16] key-8: already done (marker present), skipping.
+[2026-07-07 20:14:16] ----------------------------------------------------------------------
+[2026-07-07 20:14:16] FINAL SUMMARY: {1: 'OK', 2: 'OK', 3: 'OK', 4: 'OK', 5: 'OK', 6: 'OK', 7: 'OK', 8: 'OK'}
+[2026-07-07 20:14:16] COMBINED ARCHIVE: 2774 daily files, 2017-05-21 .. 2026-03-31, duplicates=none
+[2026-07-07 20:14:16] ALL DONE.

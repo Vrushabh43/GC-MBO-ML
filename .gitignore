@@ -1,0 +1,85 @@
+# ============================================================
+# GC Futures Order-Flow AI System — .gitignore
+# Guiding rule: code and documentation are tracked; market data,
+# credentials, and derived artifacts are NEVER tracked.
+# ============================================================
+
+# --- Credentials — never commit, no exceptions -------------------
+.env
+.env.*
+*.pem
+credentials*.json
+
+# --- Market data -------------------------------------------------
+# Ignore everything under data/ ...
+data/**
+# ...but keep directory structure traversable so the exceptions below work
+!data/**/
+# ...and keep the small, valuable provenance/documentation files
+!data/raw_mbo/KNOWN_GAPS.md
+!data/raw_mbo/download_archive.log
+!data/raw_mbo/job_metadata/**/*.json
+
+# Safety net: raw/processed market-data files anywhere in the repo
+*.dbn
+*.dbn.zst
+*.zst
+*.parquet
+*.feather
+*.arrow
+*.h5
+*.hdf5
+
+# --- Python ------------------------------------------------------
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+env/
+*.egg-info/
+.eggs/
+build/
+dist/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.tox/
+.coverage
+.coverage.*
+htmlcov/
+.ipynb_checkpoints/
+
+# --- Compiled performance core (Rust / PyO3 / Cython) ------------
+target/
+*.so
+*.pyd
+*.c        # Cython-generated C (keep hand-written C out of this rule if any)
+cython_debug/
+
+# --- ML artifacts & experiment tracking --------------------------
+models/
+checkpoints/
+*.pt
+*.pth
+*.ckpt
+*.onnx
+*.safetensors
+runs/
+wandb/
+mlruns/
+lightning_logs/
+tensorboard/
+
+# --- Logs & scratch ----------------------------------------------
+*.log
+!data/raw_mbo/download_archive.log
+logs/
+scratch/
+tmp/
+
+# --- Tooling / editor / OS ---------------------------------------
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
