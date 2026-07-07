@@ -40,7 +40,6 @@ GC/
 │       │   └── GLBX-*/              condition, metadata) — provenance record
 │       ├── KNOWN_GAPS.md         ← authoritative gap & degraded-day list
 │       └── download_archive.log  ← full download history
-├── keys/                         ← Databento API keys (key-N.txt) + .done markers
 └── scripts/
     └── download_archive.py       ← sequential batch downloader (restartable)
 ```
@@ -81,18 +80,18 @@ for record in store:
 
 ## Downloading / backfilling data
 
-`scripts/download_archive.py` downloads via Databento batch jobs, one API key
-at a time. Key files live in `keys/key-N.txt`:
+The archive was downloaded with `scripts/download_archive.py` via Databento
+batch jobs, one API key at a time. It reads key files from a `keys/` folder
+(`key-N.txt`: line 1 = API key, line 2 = date range like
+`2022-07-31 to 2023-06-30`, order-insensitive), submits the job, polls until
+packaged, downloads all daily files, then **verifies** (manifest sizes,
+calendar completeness, decode test) and writes a done-marker so re-runs skip
+finished keys.
 
-```
-line 1: db-XXXXXXXXXXXXXXXXXXXXXXXXXXXXX      ← API key
-line 2: 2022-07-31 to 2023-06-30              ← date range (order-insensitive)
-```
-
-Behaviour: submits the job, polls until packaged, downloads all daily files,
-then **verifies** (manifest sizes, calendar completeness, decode test) and
-writes `keys/.done/key-N.done`. Re-running skips finished keys, so the script
-is safely restartable after any failure.
+The `keys/` folder was deleted after the archive completed — API keys are
+provided ad hoc when needed and are never stored in or committed to this repo.
+For a future backfill, recreate `keys/key-N.txt` temporarily, run the script,
+then delete the folder again.
 
 > ⚠️ The script predates the consolidated layout: it downloads into a
 > `data/raw_mbo/<JOB-ID>/` directory. After a new download completes, move the
