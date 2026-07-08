@@ -1,0 +1,12 @@
+[build-system]
+requires = ["maturin>=1.5,<2.0"]
+build-backend = "maturin"
+
+[project]
+name = "gc-core"
+version = "0.1.0"
+description = "Compiled performance core (order store, book, queue) for the GC order-flow system"
+requires-python = ">=3.12"
+
+[tool.maturin]
+module-name = "gc_core"

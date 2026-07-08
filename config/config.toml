@@ -1,0 +1,87 @@
+# GC Futures Order-Flow AI System — central configuration
+# Authoritative spec: gc_orderflow_plan_v2.md (v2.5). No hardcoded values in code.
+
+[project]
+name = "gc_orderflow_ai"
+spec_version = "v2.5"
+
+[data]
+dataset = "GLBX.MDP3"
+schema = "mbo"
+symbols = ["GC.FUT"]
+stype_in = "parent"
+raw_archive_dir = "data/raw_mbo/daily"
+# Step 0 requirement: actual archive path and measured size recorded here.
+raw_archive_size_du = "106G"                # du -sh data/raw_mbo/daily, 2026-07-08
+archive_start = 2017-05-21
+archive_end = 2026-03-31
+known_missing_days = [2020-02-28]           # unrecoverable, quarantined (R10)
+known_gaps_doc = "data/raw_mbo/KNOWN_GAPS.md"
+
+[data.dev_slice]
+# Step 2: ~2-week early-2026 development slice (develop small, scale later).
+# Chosen: two full trading weeks incl. Sunday opens, roll-free (GCG6 front),
+# no degraded/missing days (verified by the inventory audit).
+start = 2026-01-04
+end = 2026-01-16
+
+[storage]
+# v2.5 Hardware Profile placement rules.
+capacity_tier = "/home (sda2, SATA ext4)"   # raw archive lives here, immutable
+fast_tier = "/ (nvme0n1p2, NVMe ext4)"      # plan: processed data goes here
+processed_dir = "data/processed"
+features_dir = "data/features"
+labels_dir = "data/labels"
+calendar_dir = "data/calendar"
+sample_index_dir = "data/sample_index"
+reports_dir = "reports"
+# DEVIATION NOTE: processed_dir currently resolves inside the repo on the
+# CAPACITY tier because the working sandbox is restricted to this repo.
+# Harmless at dev-slice scale; re-point processed/features/labels to an NVMe
+# path before full-archive processing. Nothing is ever placed on CIFS.
+
+[performance]
+# Phase 0 throughput requirements (CI-enforced).
+sustained_events_per_sec = 200000           # single core, historical replay
+burst_events_per_sec = 500000               # for >= 5 s without queue growth
+burst_duration_s = 5
+live_p99_event_to_feature_ms = 5
+batch_workers = 10                          # session-per-worker, 12c/24t host
+worker_memory_cap_gb = 4
+
+[determinism]
+# Phase 0: same raw DBN file twice => byte-identical outputs (CI test).
+replay_twice_byte_identical = true
+
+[engine]
+# Phase 1 raw MBO data engine behavior.
+core = "rust-pyo3"                          # Phase 0 Option A decision
+dbn_version_policy = "upgrade_to_v3"        # reader handles every encoding version present
+allow_unknown_order_events = true           # counted as data-quality incidents, never crash
+sequence_policy = "log"                     # decreasing sequence => incident (log|halt)
+invariant_policy = "log"                    # R1 invariants: log incidents + counts; tests assert 0 on clean data
+store_vs_levels_audit_interval = 1000000    # events between full order-store vs level-aggregate reconciliations
+max_incident_records = 10000                # ring buffer of detailed incidents kept in memory
+
+[roll]
+# Phase 1 contract-roll policy (full ledger emitted at Step 12.5).
+rule = "volume_cross"                       # roll when next month volume > front for N consecutive sessions
+volume_cross_sessions = 2
+
+[costs]
+# Physical facts — NEVER normalized (Critical Rule 21).
+tick_size_pts = 0.1
+tick_value_usd = 10.0
+round_trip_ticks_min = 1.5
+round_trip_ticks_max = 2.5
+
+[gpu]
+model = "RTX 2080 SUPER 8GB (Turing, CC 7.5)"
+driver = "580.82.07"
+amp = "fp16"                                # no bfloat16 on CC 7.5
+# PyTorch install deferred to Phase 8 (Model B/C); verify CC 7.5 support then.
+
+[backfill]
+# Step 0 items blocked on credentials (API keys are provided ad hoc, never stored):
+april_2026_to_present = "BLOCKED: requires Databento API key; price via metadata.get_cost when provided"
+mbp10_verification_days = "BLOCKED: requires purchase; need 2-3 days each from 2017, 2020, 2023, 2025, Q1 2026 (R1 defense)"

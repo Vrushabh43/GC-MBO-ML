@@ -52,6 +52,8 @@ htmlcov/
 
 # --- Compiled performance core (Rust / PyO3 / Cython) ------------
 target/
+.rustup/
+.cargo/
 *.so
 *.pyd
 *.c        # Cython-generated C (keep hand-written C out of this rule if any)

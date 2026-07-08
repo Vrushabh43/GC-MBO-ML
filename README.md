@@ -21,10 +21,13 @@ identical code path for historical research and live operation.
 | Raw MBO archive 2017-05-21 → 2026-03-31 | ✅ Complete — 2,774 daily files, ~113 GB compressed |
 | Archive consolidated into one folder (`data/raw_mbo/daily/`) | ✅ Done |
 | Known gaps documented | ✅ [`data/raw_mbo/KNOWN_GAPS.md`](data/raw_mbo/KNOWN_GAPS.md) |
-| April 2026+ backfill, MBP-10 verification days | ⏳ Not yet purchased |
-| Raw archive set read-only | ⏳ Pending |
-| Step 2 formal inventory audit (quality mask, roll ledger) | ⏳ Next up |
-| Book engine / features / models | ⏳ Not started |
+| Step 0: environment + compiled core decision (Rust/PyO3) | ✅ Done (repo-local toolchain, `.venv`) |
+| Step 1: project structure + `config/config.toml` | ✅ Done |
+| Step 2: inventory audit, quality mask, dev slice, archive read-only | ✅ [`reports/archive_audit.md`](reports/archive_audit.md) |
+| **Phase 1: MBO engine** (order store, book, T/F rule, invariants) | ✅ Built + 33 tests passing, ~4.5M ev/s, deterministic — [`reports/phase1_completion_report.md`](reports/phase1_completion_report.md) |
+| Phase 1 MBP-10 cross-check | ⛔ **Blocked**: MBP-10 verification days not owned (needs API key) |
+| April 2026+ backfill | ⏳ Not yet purchased |
+| Phase 2: order lifecycle + queue engine | ⏳ Next (after MBP-10 decision) |
 
 ## Repository layout
 

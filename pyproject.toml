@@ -1,0 +1,44 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "gc-orderflow"
+version = "0.1.0"
+description = "GC futures order-flow AI system (spec: gc_orderflow_plan_v2.md v2.5)"
+requires-python = ">=3.12"
+dependencies = [
+    "databento>=0.80",
+    "numpy",
+    "pandas",
+    "pyarrow",
+    "zstandard",
+]
+
+[project.optional-dependencies]
+dev = ["pytest", "maturin"]
+
+[tool.setuptools]
+package-dir = { "" = "src" }
+packages = [
+    "databento_io",
+    "mbo_engine",
+    "order_book",
+    "queue_engine",
+    "calendar_mod",
+    "features",
+    "aggregation",
+    "labeling",
+    "datasets",
+    "models",
+    "training",
+    "evaluation",
+    "policy",
+    "live",
+    "live.monitoring",
+    "utilities",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"

@@ -6,7 +6,27 @@
       "WebFetch(domain:raw.githubusercontent.com)",
       "WebSearch",
       "Bash(python3 *)",
-      "Bash(awk -F'cost_usd=' '{s+=$2; n++} END {printf \"jobs with cost: %d, TOTAL $%.2f\\\\n\", n, s}')"
+      "Bash(awk -F'cost_usd=' '{s+=$2; n++} END {printf \"jobs with cost: %d, TOTAL $%.2f\\\\n\", n, s}')",
+      "Bash(rustc --version)",
+      "Bash(cargo --version)",
+      "Bash(gcc --version)",
+      "Bash(g++ --version)",
+      "Bash(nvidia-smi --query-gpu=name,memory.total,driver_version --format=csv,noheader)",
+      "Bash(lsblk -d -o NAME,ROTA,SIZE)",
+      "Bash(lsblk -d -o NAME,ROTA,SIZE,TYPE)",
+      "Bash(mount)",
+      "Bash(.venv/bin/pip install *)",
+      "Bash(.venv/bin/python -c ' *)",
+      "Bash(export RUSTUP_HOME=/home/43e3/solr-home/GC/.rustup CARGO_HOME=/home/43e3/solr-home/GC/.cargo)",
+      "Bash(curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs -o /tmp/claude-82915/-home-43e3-solr-home-GC/56e28b49-03a5-4f4e-b267-4d58fbe50552/scratchpad/rustup-init.sh)",
+      "Bash(sh /tmp/claude-82915/-home-43e3-solr-home-GC/56e28b49-03a5-4f4e-b267-4d58fbe50552/scratchpad/rustup-init.sh -y --no-modify-path --default-toolchain stable --profile minimal)",
+      "Bash(/home/43e3/solr-home/GC/.cargo/bin/rustc --version)",
+      "Bash(/home/43e3/solr-home/GC/.cargo/bin/cargo --version)",
+      "Bash(.venv/bin/pip list *)",
+      "Bash(.venv/bin/python *)",
+      "Bash(chmod a-w *)",
+      "Bash(.venv/bin/pytest tests/test_engine_synthetic.py)",
+      "Bash(.venv/bin/pytest tests/)"
     ]
   }
 }
