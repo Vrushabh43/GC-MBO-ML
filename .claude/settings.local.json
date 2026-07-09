@@ -26,7 +26,11 @@
       "Bash(.venv/bin/python *)",
       "Bash(chmod a-w *)",
       "Bash(.venv/bin/pytest tests/test_engine_synthetic.py)",
-      "Bash(.venv/bin/pytest tests/)"
+      "Bash(.venv/bin/pytest tests/)",
+      "Bash(.venv/bin/pytest tests/test_lifecycle_synthetic.py -q)",
+      "Bash(.venv/bin/pytest tests/test_lifecycle_real.py -q)",
+      "Bash(.venv/bin/pytest tests/ -q)",
+      "Bash(echo \"demo exit: $?\")"
     ]
   }
 }

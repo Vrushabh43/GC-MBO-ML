@@ -16,6 +16,10 @@ use std::collections::BTreeMap;
 use rustc_hash::FxHashMap;
 
 use crate::book::InstrumentBook;
+use crate::lifecycle::{
+    LifecycleConfig, Tracker, POS_SENTINEL, STATE_CANCELLED, STATE_CLEARED, STATE_END_OF_DATA,
+    STATE_FILLED, STATE_REPLACED,
+};
 use crate::types::{
     Fnv1a, Incident, IncidentKind, Order, OrderState, F_LAST, F_SNAPSHOT, SIDE_ASK, SIDE_BID,
 };
@@ -37,6 +41,9 @@ pub struct Counters {
     pub t_volume_buy: u64,
     pub t_volume_sell: u64,
     pub f_volume: u64,
+    /// F volume against order ids not in the store (unknown fills) — the
+    /// only F volume that cannot appear in lifecycle fill attributions
+    pub f_volume_unattributed: u64,
     /// C records that complete an execution (an F for the same order in the
     /// same matching event) — NOT trader cancels (Phase 2 depends on this).
     pub cancels_fill_removal: u64,
@@ -113,10 +120,19 @@ pub struct Engine {
     pub t_volume_per_instrument: BTreeMap<u32, u64>,
     pub halt_on_engine_invariant: bool,
     pub halted: Option<String>,
+    /// Phase 2 order-lifecycle/queue tracker (None = Phase 1 behavior).
+    pub lifecycle: Option<Tracker>,
+    last_ts: u64,
+    lifecycle_finalized: bool,
 }
 
 impl Engine {
-    pub fn new(max_incidents: usize, audit_interval: u64, halt_on_engine_invariant: bool) -> Self {
+    pub fn new(
+        max_incidents: usize,
+        audit_interval: u64,
+        halt_on_engine_invariant: bool,
+        lifecycle: Option<LifecycleConfig>,
+    ) -> Self {
         Engine {
             books: FxHashMap::default(),
             counters: Counters::default(),
@@ -130,6 +146,9 @@ impl Engine {
             t_volume_per_instrument: BTreeMap::new(),
             halt_on_engine_invariant,
             halted: None,
+            lifecycle: lifecycle.map(Tracker::new),
+            last_ts: 0,
+            lifecycle_finalized: false,
         }
     }
 
@@ -288,31 +307,79 @@ impl Engine {
             }
         }
 
+        self.last_ts = ts_event;
         match action {
             b'R' => {
                 self.counters.clears += 1;
-                self.books.entry(instrument_id).or_default().clear();
+                let book = self.books.entry(instrument_id).or_default();
+                if let Some(tr) = self.lifecycle.as_mut() {
+                    // sweep every resting order out as Cleared (sorted ids =>
+                    // deterministic emission), then reset instrument tracking
+                    let bests = book.best_prices();
+                    let mut ids: Vec<u64> = book.orders.keys().copied().collect();
+                    ids.sort_unstable();
+                    for oid in ids {
+                        let o = book.orders[&oid];
+                        tr.on_terminate(
+                            instrument_id,
+                            oid,
+                            &o,
+                            STATE_CLEARED,
+                            POS_SENTINEL,
+                            ts_event,
+                            bests,
+                        );
+                    }
+                    tr.on_clear(instrument_id);
+                }
+                book.clear();
             }
             b'A' => {
                 self.counters.adds += 1;
-                let book = self.books.entry(instrument_id).or_default();
-                let ok = book.add_order(
-                    order_id,
-                    Order {
-                        side,
-                        price,
-                        current_size: size,
-                        initial_size: size,
-                        ts_added: ts_event,
-                        ts_last_updated: ts_event,
-                        state: OrderState::Active,
-                        from_snapshot: is_snapshot,
-                        filled_size: 0,
-                        unapplied_fill: 0,
-                        last_fill_ts: 0,
-                    },
-                );
-                if !ok {
+                let order = Order {
+                    side,
+                    price,
+                    current_size: size,
+                    initial_size: size,
+                    ts_added: ts_event,
+                    ts_last_updated: ts_event,
+                    state: OrderState::Active,
+                    from_snapshot: is_snapshot,
+                    filled_size: 0,
+                    unapplied_fill: 0,
+                    last_fill_ts: 0,
+                };
+                let duplicate;
+                {
+                    let book = self.books.entry(instrument_id).or_default();
+                    let out = book.add_order(order_id, order);
+                    duplicate = out.replaced.is_some();
+                    if let Some(tr) = self.lifecycle.as_mut() {
+                        let bests = book.best_prices();
+                        if let Some((old, pos)) = out.replaced {
+                            tr.on_terminate(
+                                instrument_id,
+                                order_id,
+                                &old,
+                                STATE_REPLACED,
+                                pos.map(|p| p as u32).unwrap_or(POS_SENTINEL),
+                                ts_event,
+                                bests,
+                            );
+                        }
+                        tr.on_add(
+                            instrument_id,
+                            order_id,
+                            &order,
+                            out.queue_pos,
+                            out.vol_ahead,
+                            bests,
+                            false,
+                        );
+                        tr.on_bests(instrument_id, ts_event, bests);
+                    }
+                }
+                if duplicate {
                     self.incident(
                         IncidentKind::DuplicateAdd,
                         ts_event,
@@ -325,63 +392,138 @@ impl Engine {
             }
             b'C' => {
                 self.counters.cancels += 1;
-                let book = self.books.entry(instrument_id).or_default();
-                match book.cancel_order(order_id) {
-                    Some(o) => {
-                        // fill-removal vs trader pull: an F for this order in
-                        // the SAME matching event means this C completes an
-                        // execution, not a cancellation.
-                        if o.last_fill_ts == ts_event {
-                            self.counters.cancels_fill_removal += 1;
-                        } else {
-                            self.counters.cancels_pulled += 1;
+                let mut size_mismatch: Option<u32> = None;
+                let mut unknown = false;
+                {
+                    let book = self.books.entry(instrument_id).or_default();
+                    // market view with the order still resting (Phase 2
+                    // distance-at-cancel is measured before removal)
+                    let bests_before = if self.lifecycle.is_some() {
+                        book.best_prices()
+                    } else {
+                        (None, None)
+                    };
+                    match book.cancel_order(order_id) {
+                        Some((o, pos)) => {
+                            // fill-removal vs trader pull: an F for this order
+                            // in the SAME matching event means this C completes
+                            // an execution, not a cancellation.
+                            let fill_removal = o.last_fill_ts == ts_event;
+                            if fill_removal {
+                                self.counters.cancels_fill_removal += 1;
+                            } else {
+                                self.counters.cancels_pulled += 1;
+                            }
+                            if size != 0 && o.current_size != size {
+                                size_mismatch = Some(o.current_size);
+                            }
+                            if let Some(tr) = self.lifecycle.as_mut() {
+                                let state = if fill_removal {
+                                    STATE_FILLED
+                                } else {
+                                    STATE_CANCELLED // partial-vs-pure resolved in tracker
+                                };
+                                tr.on_terminate(
+                                    instrument_id,
+                                    order_id,
+                                    &o,
+                                    state,
+                                    pos.map(|p| p as u32).unwrap_or(POS_SENTINEL),
+                                    ts_event,
+                                    bests_before,
+                                );
+                                tr.on_bests(instrument_id, ts_event, book.best_prices());
+                            }
                         }
-                        if size != 0 && o.current_size != size {
-                            self.incident(
-                                IncidentKind::CancelSizeMismatch,
-                                ts_event,
-                                instrument_id,
-                                order_id,
-                                sequence,
-                                format!("record size {} stored {}", size, o.current_size),
-                            );
-                        }
+                        None => unknown = true,
                     }
-                    None => {
-                        self.incident(
-                            IncidentKind::UnknownCancel,
-                            ts_event,
-                            instrument_id,
-                            order_id,
-                            sequence,
-                            String::new(),
-                        );
-                    }
+                }
+                if let Some(stored) = size_mismatch {
+                    self.incident(
+                        IncidentKind::CancelSizeMismatch,
+                        ts_event,
+                        instrument_id,
+                        order_id,
+                        sequence,
+                        format!("record size {} stored {}", size, stored),
+                    );
+                }
+                if unknown {
+                    self.incident(
+                        IncidentKind::UnknownCancel,
+                        ts_event,
+                        instrument_id,
+                        order_id,
+                        sequence,
+                        String::new(),
+                    );
                 }
             }
             b'M' => {
                 self.counters.modifies += 1;
-                let book = self.books.entry(instrument_id).or_default();
-                let known = book.modify_order(order_id, price, size, ts_event);
-                if !known {
-                    // unknown modify: treated as an add to keep the book as
-                    // complete as possible; logged as a data-quality incident
-                    book.add_order(
-                        order_id,
-                        Order {
-                            side,
-                            price,
-                            current_size: size,
-                            initial_size: size,
-                            ts_added: ts_event,
-                            ts_last_updated: ts_event,
-                            state: OrderState::Active,
-                            from_snapshot: false,
-                            filled_size: 0,
-                            unapplied_fill: 0,
-                            last_fill_ts: 0,
-                        },
-                    );
+                let mut unknown = false;
+                {
+                    let book = self.books.entry(instrument_id).or_default();
+                    match book.modify_order(order_id, price, size, ts_event) {
+                        Some((o_side, old_price, old_size, last_fill_ts)) => {
+                            if let Some(tr) = self.lifecycle.as_mut() {
+                                // an M reducing size with an F in the same
+                                // matching event applies a partial fill — not
+                                // a voluntary (trader) reduction
+                                let fill_application =
+                                    last_fill_ts == ts_event && size < old_size;
+                                let bests = book.best_prices();
+                                tr.on_modify(
+                                    instrument_id,
+                                    order_id,
+                                    o_side,
+                                    old_price,
+                                    price,
+                                    old_size,
+                                    size,
+                                    ts_event,
+                                    fill_application,
+                                    bests,
+                                );
+                                tr.on_bests(instrument_id, ts_event, bests);
+                            }
+                        }
+                        None => {
+                            // unknown modify: treated as an add to keep the
+                            // book as complete as possible; logged as a
+                            // data-quality incident
+                            unknown = true;
+                            let order = Order {
+                                side,
+                                price,
+                                current_size: size,
+                                initial_size: size,
+                                ts_added: ts_event,
+                                ts_last_updated: ts_event,
+                                state: OrderState::Active,
+                                from_snapshot: false,
+                                filled_size: 0,
+                                unapplied_fill: 0,
+                                last_fill_ts: 0,
+                            };
+                            let out = book.add_order(order_id, order);
+                            if let Some(tr) = self.lifecycle.as_mut() {
+                                let bests = book.best_prices();
+                                tr.on_add(
+                                    instrument_id,
+                                    order_id,
+                                    &order,
+                                    out.queue_pos,
+                                    out.vol_ahead,
+                                    bests,
+                                    true,
+                                );
+                                tr.on_bests(instrument_id, ts_event, bests);
+                            }
+                        }
+                    }
+                }
+                if unknown {
                     self.incident(
                         IncidentKind::UnknownModify,
                         ts_event,
@@ -419,6 +561,7 @@ impl Engine {
                 let book = self.books.entry(instrument_id).or_default();
                 let (found, over) = book.record_fill(order_id, size, ts_event);
                 if !found {
+                    self.counters.f_volume_unattributed += size as u64;
                     self.incident(
                         IncidentKind::UnknownFill,
                         ts_event,
@@ -449,9 +592,49 @@ impl Engine {
         self.halted.is_none()
     }
 
-    /// Flush any open matching-event group (call at end of stream).
+    /// Flush any open matching-event group (call at end of stream) and, with
+    /// lifecycle tracking on, emit an EndOfData record for every order still
+    /// resting (idempotent; sorted instrument/order ids => deterministic).
+    /// The books themselves stay intact and queryable (Milestone 1 views).
     pub fn finish(&mut self) {
         self.flush_group();
+        if self.lifecycle_finalized {
+            return;
+        }
+        self.lifecycle_finalized = true;
+        let Some(tr) = self.lifecycle.as_mut() else {
+            return;
+        };
+        let ts = self.last_ts;
+        let mut iids: Vec<u32> = self.books.keys().copied().collect();
+        iids.sort_unstable();
+        for iid in iids {
+            let book = &self.books[&iid];
+            let bests = book.best_prices();
+            // every order's FIFO position in one O(N) sweep
+            let mut pos: FxHashMap<u64, u32> = FxHashMap::default();
+            for side in [&book.bids, &book.asks] {
+                for lvl in side.levels.values() {
+                    for (i, &id) in lvl.fifo.iter().enumerate() {
+                        pos.insert(id, i as u32);
+                    }
+                }
+            }
+            let mut ids: Vec<u64> = book.orders.keys().copied().collect();
+            ids.sort_unstable();
+            for oid in ids {
+                let o = book.orders[&oid];
+                tr.on_terminate(
+                    iid,
+                    oid,
+                    &o,
+                    STATE_END_OF_DATA,
+                    pos.get(&oid).copied().unwrap_or(POS_SENTINEL),
+                    ts,
+                    bests,
+                );
+            }
+        }
     }
 
     /// Deterministic digest over the full engine state (all instruments,
@@ -491,6 +674,7 @@ impl Engine {
             ("t_volume_buy", c.t_volume_buy),
             ("t_volume_sell", c.t_volume_sell),
             ("f_volume", c.f_volume),
+            ("f_volume_unattributed", c.f_volume_unattributed),
             ("cancels_fill_removal", c.cancels_fill_removal),
             ("cancels_pulled", c.cancels_pulled),
             ("event_groups", c.event_groups),

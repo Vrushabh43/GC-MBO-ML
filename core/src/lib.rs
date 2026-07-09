@@ -7,14 +7,17 @@
 
 mod book;
 mod engine;
+mod lifecycle;
 mod types;
 
 use pyo3::exceptions::{PyIOError, PyValueError};
 use pyo3::prelude::*;
+use pyo3::types::PyBytes;
 
 use dbn::decode::DecodeRecordRef;
 
 use engine::Engine;
+use lifecycle::LifecycleConfig;
 use types::{SIDE_ASK, SIDE_BID};
 
 fn side_byte(side: char) -> PyResult<u8> {
@@ -36,11 +39,25 @@ impl MboEngine {
     /// max_incidents: detailed-incident ring size (counters always exact).
     /// audit_interval: records between full store-vs-levels audits (R1).
     /// halt_on_engine_invariant: halt processing on store/levels mismatch.
+    /// lifecycle: enable the Phase 2 order-lifecycle/queue tracker.
+    /// iceberg_window_ns / iceberg_clip_tol: refill-chain heuristic bounds.
     #[new]
-    #[pyo3(signature = (max_incidents=10000, audit_interval=1_000_000, halt_on_engine_invariant=true))]
-    fn new(max_incidents: usize, audit_interval: u64, halt_on_engine_invariant: bool) -> Self {
+    #[pyo3(signature = (max_incidents=10000, audit_interval=1_000_000, halt_on_engine_invariant=true,
+                        lifecycle=false, iceberg_window_ns=2_000_000, iceberg_clip_tol=1.0))]
+    fn new(
+        max_incidents: usize,
+        audit_interval: u64,
+        halt_on_engine_invariant: bool,
+        lifecycle: bool,
+        iceberg_window_ns: u64,
+        iceberg_clip_tol: f64,
+    ) -> Self {
+        let lc = lifecycle.then_some(LifecycleConfig {
+            iceberg_window_ns,
+            iceberg_clip_tol,
+        });
         MboEngine {
-            inner: Engine::new(max_incidents, audit_interval, halt_on_engine_invariant),
+            inner: Engine::new(max_incidents, audit_interval, halt_on_engine_invariant, lc),
         }
     }
 
@@ -269,6 +286,117 @@ impl MboEngine {
     fn halted(&self) -> Option<String> {
         self.inner.halted.clone()
     }
+
+    // -- Phase 2: order lifecycle + queue engine ---------------------------
+
+    /// Volume resting ahead of an order in its level's FIFO.
+    fn volume_ahead(&self, instrument_id: u32, order_id: u64) -> Option<u64> {
+        self.inner.books.get(&instrument_id)?.volume_ahead(order_id)
+    }
+
+    /// Liquidity-age distribution of a price level, front of queue first:
+    /// [(order_id, age_ns, current_size, from_snapshot)].
+    #[pyo3(signature = (instrument_id, side, price, ts_now))]
+    fn level_ages(
+        &self,
+        instrument_id: u32,
+        side: char,
+        price: i64,
+        ts_now: u64,
+    ) -> PyResult<Vec<(u64, u64, u32, bool)>> {
+        let s = side_byte(side)?;
+        Ok(self
+            .inner
+            .books
+            .get(&instrument_id)
+            .map(|b| b.level_ages(s, price, ts_now))
+            .unwrap_or_default())
+    }
+
+    /// Completed lifecycle records not yet drained.
+    fn lifecycle_len(&self) -> usize {
+        self.inner
+            .lifecycle
+            .as_ref()
+            .map(|t| t.records.len())
+            .unwrap_or(0)
+    }
+
+    /// Running deterministic digest over every emitted lifecycle record
+    /// (replay-twice CI test for Phase 2 output).
+    fn lifecycle_digest(&self) -> Option<u64> {
+        self.inner.lifecycle.as_ref().map(|t| t.lifecycle_digest())
+    }
+
+    /// (records_emitted_total, iceberg_links_made, refill_slots_opened).
+    fn lifecycle_stats(&self) -> Option<(u64, u64, u64)> {
+        self.inner
+            .lifecycle
+            .as_ref()
+            .map(|t| (t.emitted, t.links_made, t.refill_slots))
+    }
+
+    /// Drain completed lifecycle records as raw little-endian column
+    /// buffers: [(column_name, numpy_dtype, bytes)]. The tracker keeps
+    /// running; call after finish() for a full session, or periodically.
+    fn lifecycle_drain(&mut self, py: Python<'_>) -> PyResult<Vec<(String, String, Py<PyBytes>)>> {
+        let Some(tr) = self.inner.lifecycle.as_mut() else {
+            return Err(PyValueError::new_err(
+                "lifecycle tracking is disabled (construct with lifecycle=True)",
+            ));
+        };
+        let r = tr.drain();
+
+        fn b_u8(py: Python<'_>, v: &[u8]) -> Py<PyBytes> {
+            PyBytes::new(py, v).unbind()
+        }
+        macro_rules! b_le {
+            ($py:expr, $v:expr, $w:expr) => {{
+                let mut buf = Vec::with_capacity($v.len() * $w);
+                for x in $v.iter() {
+                    buf.extend_from_slice(&x.to_le_bytes());
+                }
+                PyBytes::new($py, &buf).unbind()
+            }};
+        }
+        macro_rules! cols {
+            ($(($name:expr, $dt:expr, $bytes:expr)),+ $(,)?) => {
+                vec![$(($name.to_string(), $dt.to_string(), $bytes)),+]
+            };
+        }
+        Ok(cols![
+            ("instrument_id", "<u4", b_le!(py, r.instrument_id, 4)),
+            ("order_id", "<u8", b_le!(py, r.order_id, 8)),
+            ("side", "u1", b_u8(py, &r.side)),
+            ("price_at_add", "<i8", b_le!(py, r.price_at_add, 8)),
+            ("price_final", "<i8", b_le!(py, r.price_final, 8)),
+            ("ts_added", "<u8", b_le!(py, r.ts_added, 8)),
+            ("ts_terminated", "<u8", b_le!(py, r.ts_terminated, 8)),
+            ("from_snapshot", "u1", b_u8(py, &r.from_snapshot)),
+            ("entered_unknown_modify", "u1", b_u8(py, &r.entered_unknown_modify)),
+            ("initial_size", "<u4", b_le!(py, r.initial_size, 4)),
+            ("max_size", "<u4", b_le!(py, r.max_size, 4)),
+            ("final_size", "<u4", b_le!(py, r.final_size, 4)),
+            ("filled_size", "<u4", b_le!(py, r.filled_size, 4)),
+            ("cancelled_size", "<u8", b_le!(py, r.cancelled_size, 8)),
+            ("n_size_increases", "<u4", b_le!(py, r.n_size_increases, 4)),
+            ("n_size_decreases", "<u4", b_le!(py, r.n_size_decreases, 4)),
+            ("n_price_changes", "<u4", b_le!(py, r.n_price_changes, 4)),
+            ("final_state", "u1", b_u8(py, &r.final_state)),
+            ("queue_pos_at_add", "<u4", b_le!(py, r.queue_pos_at_add, 4)),
+            ("vol_ahead_at_add", "<u8", b_le!(py, r.vol_ahead_at_add, 8)),
+            ("queue_pos_at_term", "<u4", b_le!(py, r.queue_pos_at_term, 4)),
+            ("dist_same_at_add", "<i8", b_le!(py, r.dist_same_at_add, 8)),
+            ("dist_mid2_at_add", "<i8", b_le!(py, r.dist_mid2_at_add, 8)),
+            ("dist_same_at_term", "<i8", b_le!(py, r.dist_same_at_term, 8)),
+            ("dist_mid2_at_term", "<i8", b_le!(py, r.dist_mid2_at_term, 8)),
+            ("min_dist_same", "<i8", b_le!(py, r.min_dist_same, 8)),
+            ("chain_id", "<u8", b_le!(py, r.chain_id, 8)),
+            ("chain_index", "<u4", b_le!(py, r.chain_index, 4)),
+            ("link_confidence", "<f4", b_le!(py, r.link_confidence, 4)),
+            ("link_dt_ns", "<u8", b_le!(py, r.link_dt_ns, 8)),
+        ])
+    }
 }
 
 #[pymodule]
@@ -277,5 +405,15 @@ fn gc_core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add("UNDEF_PRICE", types::UNDEF_PRICE)?;
     m.add("F_LAST", types::F_LAST)?;
     m.add("F_SNAPSHOT", types::F_SNAPSHOT)?;
+    // Phase 2 lifecycle terminal states (neutral mechanics, never intent)
+    m.add("STATE_FILLED", lifecycle::STATE_FILLED)?;
+    m.add("STATE_PARTIAL_CANCELLED", lifecycle::STATE_PARTIAL_CANCELLED)?;
+    m.add("STATE_CANCELLED", lifecycle::STATE_CANCELLED)?;
+    m.add("STATE_CLEARED", lifecycle::STATE_CLEARED)?;
+    m.add("STATE_END_OF_DATA", lifecycle::STATE_END_OF_DATA)?;
+    m.add("STATE_REPLACED", lifecycle::STATE_REPLACED)?;
+    m.add("POS_SENTINEL", lifecycle::POS_SENTINEL)?;
+    m.add("DIST_SENTINEL", lifecycle::DIST_SENTINEL)?;
+    m.add("MIN_DIST_SENTINEL", lifecycle::MIN_DIST_SENTINEL)?;
     Ok(())
 }

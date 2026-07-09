@@ -25,9 +25,10 @@ identical code path for historical research and live operation.
 | Step 1: project structure + `config/config.toml` | ✅ Done |
 | Step 2: inventory audit, quality mask, dev slice, archive read-only | ✅ [`reports/archive_audit.md`](reports/archive_audit.md) |
 | **Phase 1: MBO engine** (order store, book, T/F rule, invariants) | ✅ Built + 33 tests passing, ~4.5M ev/s, deterministic — [`reports/phase1_completion_report.md`](reports/phase1_completion_report.md) |
-| Phase 1 MBP-10 cross-check | ⛔ **Blocked**: MBP-10 verification days not owned (needs API key) |
+| Phase 1 MBP-10 cross-check | ⚠️ **Deferred** (user decision 2026-07-09): out of scope / not yet purchased. Interim R1 defense = independent pure-Python cross-check. Phase 1 is **not MBP-10 snapshot-verified**. |
 | April 2026+ backfill | ⏳ Not yet purchased |
-| Phase 2: order lifecycle + queue engine | ⏳ Next (after MBP-10 decision) |
+| **Phase 2: order lifecycle + queue engine** (lifecycle records, FIFO queue positions, iceberg chains) | ✅ Complete — 81 tests total, ~2.9M ev/s with tracking, deterministic — [`reports/phase2_completion_report.md`](reports/phase2_completion_report.md) |
+| Phase 3: core order-flow features | ⏳ Next |
 
 ## Repository layout
 

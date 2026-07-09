@@ -27,24 +27,34 @@ pub struct BookSide {
 }
 
 impl BookSide {
-    fn add(&mut self, price: i64, order_id: u64, size: u32) {
+    /// Insert at the back of the level's FIFO. Returns the queue state the
+    /// order joined behind: (orders ahead, volume ahead) — the Phase 2
+    /// queue-position-at-add measurement.
+    fn add(&mut self, price: i64, order_id: u64, size: u32) -> (u32, u64) {
         let lvl = self.levels.entry(price).or_default();
+        let ahead = (lvl.order_count, lvl.total_size);
         lvl.total_size += size as u64;
         lvl.order_count += 1;
         lvl.fifo.push_back(order_id);
+        ahead
     }
 
-    fn remove(&mut self, price: i64, order_id: u64, size: u32) {
+    /// Remove an order from its level. Returns its FIFO position at removal
+    /// (0 = front of queue) — the Phase 2 queue-position-at-termination.
+    fn remove(&mut self, price: i64, order_id: u64, size: u32) -> Option<usize> {
+        let mut removed_pos = None;
         if let Some(lvl) = self.levels.get_mut(&price) {
             lvl.total_size = lvl.total_size.saturating_sub(size as u64);
             lvl.order_count = lvl.order_count.saturating_sub(1);
             if let Some(pos) = lvl.fifo.iter().position(|&id| id == order_id) {
                 lvl.fifo.remove(pos);
+                removed_pos = Some(pos);
             }
             if lvl.order_count == 0 {
                 self.levels.remove(&price);
             }
         }
+        removed_pos
     }
 
     /// Size reduction in place (priority retained).
@@ -64,6 +74,13 @@ impl BookSide {
             }
         }
     }
+}
+
+/// Result of inserting an order (see `InstrumentBook::add_order`).
+pub struct AddOutcome {
+    pub replaced: Option<(Order, Option<usize>)>,
+    pub queue_pos: u32,
+    pub vol_ahead: u64,
 }
 
 #[derive(Default)]
@@ -88,43 +105,53 @@ impl InstrumentBook {
         self.asks.levels.clear();
     }
 
-    /// Insert a new order. Returns false if the order id already existed
-    /// (caller logs the incident; the stale order is replaced to keep the
-    /// two views synchronized).
-    pub fn add_order(&mut self, order_id: u64, order: Order) -> bool {
+    /// Insert a new order. `replaced` is Some (with the displaced order and
+    /// its FIFO position) if the order id already existed — the caller logs
+    /// the incident; the stale order is replaced to keep the two views
+    /// synchronized. `queue_pos`/`vol_ahead` describe the queue the new
+    /// order joined behind (Phase 2).
+    pub fn add_order(&mut self, order_id: u64, order: Order) -> AddOutcome {
+        let mut replaced = None;
         if let Some(old) = self.orders.remove(&order_id) {
             let (p, s) = (old.price, old.current_size);
-            self.side_mut(old.side).remove(p, order_id, s);
-            self.orders.insert(order_id, order);
-            self.side_mut(order.side).add(order.price, order_id, order.current_size);
-            return false;
+            let pos = self.side_mut(old.side).remove(p, order_id, s);
+            replaced = Some((old, pos));
         }
         self.orders.insert(order_id, order);
-        self.side_mut(order.side).add(order.price, order_id, order.current_size);
-        true
+        let (queue_pos, vol_ahead) =
+            self.side_mut(order.side)
+                .add(order.price, order_id, order.current_size);
+        AddOutcome {
+            replaced,
+            queue_pos,
+            vol_ahead,
+        }
     }
 
-    /// Full cancel (book removal). Returns the removed order so the caller
-    /// can classify it (trader pull vs fill-removal) and verify sizes.
-    pub fn cancel_order(&mut self, order_id: u64) -> Option<Order> {
+    /// Full cancel (book removal). Returns the removed order — so the caller
+    /// can classify it (trader pull vs fill-removal) and verify sizes — plus
+    /// its FIFO position at removal (Phase 2).
+    pub fn cancel_order(&mut self, order_id: u64) -> Option<(Order, Option<usize>)> {
         let o = self.orders.remove(&order_id)?;
-        self.side_mut(o.side).remove(o.price, order_id, o.current_size);
-        Some(o)
+        let pos = self.side_mut(o.side).remove(o.price, order_id, o.current_size);
+        Some((o, pos))
     }
 
     /// Modify price and/or size per Globex priority rules.
-    /// Returns false if the order is unknown.
+    /// Returns the pre-modify (side, price, size, last_fill_ts) — the
+    /// Phase 2 tracker classifies the change from these — or None if unknown.
     pub fn modify_order(
         &mut self,
         order_id: u64,
         new_price: i64,
         new_size: u32,
         ts: u64,
-    ) -> bool {
+    ) -> Option<(u8, i64, u32, u64)> {
         let Some(o) = self.orders.get_mut(&order_id) else {
-            return false;
+            return None;
         };
         let (side, old_price, old_size) = (o.side, o.price, o.current_size);
+        let last_fill_ts = o.last_fill_ts;
         o.price = new_price;
         o.current_size = new_size;
         o.ts_last_updated = ts;
@@ -141,7 +168,7 @@ impl InstrumentBook {
             // size decrease: priority retained
             self.side_mut(side).reduce(old_price, (old_size - new_size) as u64);
         }
-        true
+        Some((side, old_price, old_size, last_fill_ts))
     }
 
     /// Record an execution against a resting order. Per verified GLBX
@@ -165,6 +192,58 @@ impl InstrumentBook {
 
     pub fn best_ask(&self) -> Option<(i64, &Level)> {
         self.asks.levels.iter().next().map(|(p, l)| (*p, l))
+    }
+
+    /// (best bid price, best ask price) — the Phase 2 tracker's market view.
+    pub fn best_prices(&self) -> (Option<i64>, Option<i64>) {
+        (
+            self.bids.levels.keys().next_back().copied(),
+            self.asks.levels.keys().next().copied(),
+        )
+    }
+
+    /// Volume resting ahead of an order in its level's FIFO (Phase 2 queue
+    /// query; queue position itself is the FIFO index).
+    pub fn volume_ahead(&self, order_id: u64) -> Option<u64> {
+        let o = self.orders.get(&order_id)?;
+        let side = if o.side == SIDE_BID { &self.bids } else { &self.asks };
+        let fifo = &side.levels.get(&o.price)?.fifo;
+        let mut vol = 0u64;
+        for &id in fifo.iter() {
+            if id == order_id {
+                return Some(vol);
+            }
+            vol += self.orders.get(&id).map(|x| x.current_size as u64).unwrap_or(0);
+        }
+        None
+    }
+
+    /// Liquidity-age distribution of a price level, front of queue first:
+    /// (order_id, age_ns relative to `ts_now`, current_size, from_snapshot).
+    /// Phase 3 liquidity-age features sample this.
+    pub fn level_ages(
+        &self,
+        side: u8,
+        price: i64,
+        ts_now: u64,
+    ) -> Vec<(u64, u64, u32, bool)> {
+        let s = if side == SIDE_BID { &self.bids } else { &self.asks };
+        let Some(lvl) = s.levels.get(&price) else {
+            return Vec::new();
+        };
+        lvl.fifo
+            .iter()
+            .filter_map(|&id| {
+                self.orders.get(&id).map(|o| {
+                    (
+                        id,
+                        ts_now.saturating_sub(o.ts_added),
+                        o.current_size,
+                        o.from_snapshot,
+                    )
+                })
+            })
+            .collect()
     }
 
     /// Top-n levels from the aggregated price-level view.

@@ -33,13 +33,17 @@ class ReplayResult:
 class MboEngine:
     """Order-book engine for one replay stream (historical file or live push)."""
 
-    def __init__(self, cfg: Config | None = None) -> None:
+    def __init__(self, cfg: Config | None = None, lifecycle: bool | None = None) -> None:
         self.cfg = cfg or load_config()
         e = self.cfg.engine
+        lc = self.cfg.lifecycle
         self._core = gc_core.MboEngine(
             max_incidents=e.max_incident_records,
             audit_interval=e.store_vs_levels_audit_interval,
             halt_on_engine_invariant=(e.invariant_policy == "halt"),
+            lifecycle=lc.enabled if lifecycle is None else lifecycle,
+            iceberg_window_ns=lc.iceberg_link_window_ns,
+            iceberg_clip_tol=lc.iceberg_clip_tolerance,
         )
         self._symbol_by_iid: dict[int, str] = {}
 
@@ -143,3 +147,43 @@ class MboEngine:
 
     def halted(self) -> str | None:
         return self._core.halted()
+
+    # -- Phase 2: order lifecycle + queue engine -----------------------------
+
+    def volume_ahead(self, instrument_id: int, order_id: int) -> int | None:
+        """Volume resting ahead of the order in its level's FIFO."""
+        return self._core.volume_ahead(instrument_id, order_id)
+
+    def level_ages(
+        self, instrument_id: int, side: str, price: int, ts_now: int
+    ) -> list[tuple[int, int, int, bool]]:
+        """Liquidity ages at a level, front-first:
+        (order_id, age_ns, current_size, from_snapshot)."""
+        return self._core.level_ages(instrument_id, side, price, ts_now)
+
+    def lifecycle_len(self) -> int:
+        return self._core.lifecycle_len()
+
+    def lifecycle_digest(self) -> int | None:
+        """Deterministic digest over all emitted lifecycle records."""
+        return self._core.lifecycle_digest()
+
+    def lifecycle_stats(self) -> dict[str, int]:
+        """records_emitted / iceberg_links_made / refill_slots_opened."""
+        s = self._core.lifecycle_stats()
+        if s is None:
+            return {}
+        return {
+            "records_emitted": s[0],
+            "iceberg_links_made": s[1],
+            "refill_slots_opened": s[2],
+        }
+
+    def lifecycle_drain(self) -> dict[str, "np.ndarray"]:
+        """Take all completed lifecycle records as numpy column arrays."""
+        import numpy as np
+
+        return {
+            name: np.frombuffer(buf, dtype=np.dtype(dt))
+            for name, dt, buf in self._core.lifecycle_drain()
+        }

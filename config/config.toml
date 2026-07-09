@@ -84,4 +84,18 @@ amp = "fp16"                                # no bfloat16 on CC 7.5
 [backfill]
 # Step 0 items blocked on credentials (API keys are provided ad hoc, never stored):
 april_2026_to_present = "BLOCKED: requires Databento API key; price via metadata.get_cost when provided"
-mbp10_verification_days = "BLOCKED: requires purchase; need 2-3 days each from 2017, 2020, 2023, 2025, Q1 2026 (R1 defense)"
+# MBP-10 check DEFERRED by user decision 2026-07-09: out of scope / not yet
+# purchased; does NOT block Phase 2. Interim R1 defense = independent
+# pure-Python cross-check + Phase 1 suite. Phase 1 is NOT MBP-10-verified.
+mbp10_verification_days = "DEFERRED (2026-07-09): if ever purchased, 2-3 days each from 2017, 2020, 2023, 2025, Q1 2026 (R1 defense)"
+
+[lifecycle]
+# Phase 2 — order lifecycle and queue engine (plan Phase 2 + Step 6).
+enabled = true
+# CME iceberg refill heuristic (plan Phase 2 [NEW]): link an Add to a parent
+# fully-filled order at the same price/side within this window, size <= the
+# parent's displayed clip. Heuristic — confidence stored, never treated as fact
+# (Critical Rule 8).
+iceberg_link_window_ns = 2000000            # 2 ms default per plan
+iceberg_clip_tolerance = 1.0                # child size <= tol * parent displayed clip
+lifecycle_dir = "data/processed/lifecycle"  # per-session Parquet output

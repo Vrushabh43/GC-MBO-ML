@@ -2,13 +2,28 @@
 
 Date: 2026-07-09 | Spec: `gc_orderflow_plan_v2.md` v2.5 | Build Order Steps 0–5
 
-## Verdict: **PARTIALLY COMPLETE** — engine built and verified; one plan-mandated verification blocked on data acquisition
+## Verdict: **COMPLETE, with the MBP-10 snapshot verification explicitly DEFERRED**
 
 Everything implementable with owned data is implemented, tested, and passing.
-The single open item is the **MBP-10 cross-check** (Milestone 1 verification),
-which requires MBP-10 data we do not own (plan Step 0: "confirm MBP-10
-verification data" — blocked on an API key/purchase decision). An independent
+The single open item was the **MBP-10 cross-check** (plan "Milestone 1
+verification"), which requires MBP-10 data we do not own. An independent
 pure-Python reference-book cross-check was substituted in the interim.
+
+> **Decision (user, 2026-07-09): MBP-10 cross-check DEFERRED.** MBP-10
+> snapshot data will not be purchased or tested in this phase. The check is
+> reclassified as an **out-of-scope / not-yet-purchased validation item** and
+> does **not** block Phase 2. The pure-Python independent reference-book
+> cross-check (exact top-10 agreement, both sides) plus the existing Phase 1
+> test suite are accepted as the **interim R1 defense**.
+>
+> **Caveat, stated plainly: Phase 1 is NOT MBP-10 snapshot-verified.** The
+> book reconstruction has never been compared against an exchange-derived
+> MBP-10 feed. The interim cross-check is an independent *re-implementation*
+> of the same MBO semantics, so it defends against implementation bugs but
+> not against a shared misreading of the feed semantics. If MBP-10 data is
+> ever purchased, run the deferred check for 2–3 days each from
+> 2017 / 2020 / 2023 / 2025 / Q1-2026 before trusting any result that
+> depends critically on absolute book depth.
 
 ---
 
@@ -105,11 +120,12 @@ v2.5 storage rule. Dev slice selected and verified: **2026-01-04 .. 2026-01-16**
 
 ## 4. Known limitations
 
-1. **MBP-10 cross-check not run (plan Milestone 1 verification, R1 defense a).**
-   Requires MBP-10 data for verification days — not owned; purchase requires an
-   API key (provided ad hoc only). *Interim mitigation:* independent
-   pure-Python reference book agrees exactly on top-10 both sides.
-   **This is the blocking item for declaring Phase 1 fully complete.**
+1. **MBP-10 cross-check not run (plan Milestone 1 verification, R1 defense a)
+   — DEFERRED by user decision 2026-07-09 (see verdict box above).** Requires
+   MBP-10 data for verification days — not owned, not being purchased in this
+   phase. *Interim mitigation (accepted):* independent pure-Python reference
+   book agrees exactly on top-10 both sides. **No longer blocks Phase 2**, but
+   Phase 1 remains not-MBP-10-snapshot-verified until the data is purchased.
 2. **T/F partial-implied residue**: ~0.01–0.1% of execution groups have
    T>F>0 (outright aggressor partially matched against implied spread
    liquidity). Logged as incidents per the plan's reconciliation rule;
@@ -135,11 +151,12 @@ v2.5 storage rule. Dev slice selected and verified: **2026-01-04 .. 2026-01-16**
 - Milestone 1 (both views, top-10, spread, size/count per level): **DONE** (`reports/milestone1_book.md`)
 - Determinism (replay-twice byte-identical): **PASS** (CI benchmark)
 - Throughput (≥200k ev/s sustained): **PASS** at ~4.5M ev/s
-- MBP-10 verification: **BLOCKED — requires MBP-10 data purchase**
+- MBP-10 verification: **DEFERRED (user decision 2026-07-09)** — out of
+  scope / not yet purchased; interim R1 defense = pure-Python cross-check +
+  Phase 1 test suite. Phase 1 is not MBP-10 snapshot-verified.
 
-Per the phase-progression rule ("do not start a later phase while an earlier
-phase has unresolved architecture requirements"), Phase 2 should start only
-after the MBP-10 decision: either (a) provide a Databento key to price and
-pull the verification days (2–3 days each from 2017/2020/2023/2025/Q1-2026,
-MBP-10 schema — cheap relative to MBO), or (b) explicitly defer the MBP-10
-check and accept the pure-Python cross-check as the interim R1 defense.
+**Gate resolution:** the phase-progression rule required either the MBP-10
+data or an explicit deferral; option (b) — explicit deferral — was chosen by
+the user on 2026-07-09. **Phase 2 (order lifecycle and queue engine) is
+cleared to start.** The deferred check stays on the backlog alongside the
+April-2026+ backfill (see `config/config.toml` blocked-items log).

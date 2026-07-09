@@ -62,11 +62,22 @@ class EngineConfig:
 
 
 @dataclass(frozen=True)
+class LifecycleConfig:
+    """Phase 2 order-lifecycle / queue-engine settings."""
+
+    enabled: bool
+    iceberg_link_window_ns: int
+    iceberg_clip_tolerance: float
+    lifecycle_dir: Path
+
+
+@dataclass(frozen=True)
 class Config:
     data: DataConfig
     storage: StorageConfig
     performance: PerformanceConfig
     engine: EngineConfig
+    lifecycle: LifecycleConfig
     raw: dict[str, Any] = field(repr=False, default_factory=dict)
 
 
@@ -85,6 +96,7 @@ def load_config(path: Path | None = None) -> Config:
     s = raw["storage"]
     perf = raw["performance"]
     e = raw["engine"]
+    lc = raw["lifecycle"]
 
     def rp(rel: str) -> Path:
         q = Path(rel)
@@ -127,6 +139,12 @@ def load_config(path: Path | None = None) -> Config:
             invariant_policy=e["invariant_policy"],
             store_vs_levels_audit_interval=e["store_vs_levels_audit_interval"],
             max_incident_records=e["max_incident_records"],
+        ),
+        lifecycle=LifecycleConfig(
+            enabled=lc["enabled"],
+            iceberg_link_window_ns=lc["iceberg_link_window_ns"],
+            iceberg_clip_tolerance=lc["iceberg_clip_tolerance"],
+            lifecycle_dir=rp(lc["lifecycle_dir"]),
         ),
         raw=raw,
     )
