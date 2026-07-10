@@ -16,6 +16,7 @@ use std::collections::BTreeMap;
 use rustc_hash::FxHashMap;
 
 use crate::book::InstrumentBook;
+use crate::flow::{FlowConfig, FlowRecorder, TermSummary};
 use crate::lifecycle::{
     LifecycleConfig, Tracker, POS_SENTINEL, STATE_CANCELLED, STATE_CLEARED, STATE_END_OF_DATA,
     STATE_FILLED, STATE_REPLACED,
@@ -122,6 +123,9 @@ pub struct Engine {
     pub halted: Option<String>,
     /// Phase 2 order-lifecycle/queue tracker (None = Phase 1 behavior).
     pub lifecycle: Option<Tracker>,
+    /// Phase 3 per-group flow-primitive recorder for one tracked instrument
+    /// (requires the lifecycle tracker).
+    pub flow: Option<FlowRecorder>,
     last_ts: u64,
     lifecycle_finalized: bool,
 }
@@ -147,9 +151,21 @@ impl Engine {
             halt_on_engine_invariant,
             halted: None,
             lifecycle: lifecycle.map(Tracker::new),
+            flow: None,
             last_ts: 0,
             lifecycle_finalized: false,
         }
+    }
+
+    /// Enable Phase 3 flow-primitive recording for one instrument. Errors
+    /// (returns false) if the lifecycle tracker is off — termination and
+    /// refill primitives come from it.
+    pub fn enable_flow(&mut self, cfg: FlowConfig) -> bool {
+        if self.lifecycle.is_none() {
+            return false;
+        }
+        self.flow = Some(FlowRecorder::new(cfg));
+        true
     }
 
     fn incident(
@@ -213,6 +229,12 @@ impl Engine {
                     format!("F={} with no T", f),
                 );
             }
+        }
+        // Phase 3: emit one flow-primitive row for the tracked instrument,
+        // reflecting the group's flow and the post-group book state.
+        if let Some(fr) = self.flow.as_mut() {
+            let iid = fr.instrument();
+            fr.flush(ts, self.books.get(&iid));
         }
         // crossed-book invariant at matching-event end (R1); legitimate
         // transient crossings inside a group are not flagged.
@@ -332,6 +354,11 @@ impl Engine {
                     }
                     tr.on_clear(instrument_id);
                 }
+                if let Some(fr) = self.flow.as_mut() {
+                    if fr.instrument() == instrument_id {
+                        fr.on_clear();
+                    }
+                }
                 book.clear();
             }
             b'A' => {
@@ -367,7 +394,7 @@ impl Engine {
                                 bests,
                             );
                         }
-                        tr.on_add(
+                        let link = tr.on_add(
                             instrument_id,
                             order_id,
                             &order,
@@ -377,6 +404,19 @@ impl Engine {
                             false,
                         );
                         tr.on_bests(instrument_id, ts_event, bests);
+                        if let Some(fr) = self.flow.as_mut() {
+                            if fr.instrument() == instrument_id {
+                                let dist = if side == SIDE_BID {
+                                    bests.0.map(|b| b - price)
+                                } else {
+                                    bests.1.map(|a| price - a)
+                                };
+                                fr.on_add(side, size, dist);
+                                if let Some(conf) = link {
+                                    fr.on_refill(side, conf);
+                                }
+                            }
+                        }
                     }
                 }
                 if duplicate {
@@ -423,7 +463,7 @@ impl Engine {
                                 } else {
                                     STATE_CANCELLED // partial-vs-pure resolved in tracker
                                 };
-                                tr.on_terminate(
+                                let (fstate, touched, is_refill, lifetime) = tr.on_terminate(
                                     instrument_id,
                                     order_id,
                                     &o,
@@ -433,6 +473,25 @@ impl Engine {
                                     bests_before,
                                 );
                                 tr.on_bests(instrument_id, ts_event, book.best_prices());
+                                if let Some(fr) = self.flow.as_mut() {
+                                    if fr.instrument() == instrument_id {
+                                        if !fill_removal {
+                                            // trader pull: liquidity withdrawn
+                                            let dist = if o.side == SIDE_BID {
+                                                bests_before.0.map(|b| b - o.price)
+                                            } else {
+                                                bests_before.1.map(|a| o.price - a)
+                                            };
+                                            fr.on_pull(o.side, o.current_size, dist);
+                                        }
+                                        fr.on_termination(&TermSummary {
+                                            filled: fstate == STATE_FILLED,
+                                            touched,
+                                            is_refill_link: is_refill,
+                                            lifetime_ns: lifetime,
+                                        });
+                                    }
+                                }
                             }
                         }
                         None => unknown = true,
@@ -509,7 +568,7 @@ impl Engine {
                             let out = book.add_order(order_id, order);
                             if let Some(tr) = self.lifecycle.as_mut() {
                                 let bests = book.best_prices();
-                                tr.on_add(
+                                let link = tr.on_add(
                                     instrument_id,
                                     order_id,
                                     &order,
@@ -519,6 +578,19 @@ impl Engine {
                                     true,
                                 );
                                 tr.on_bests(instrument_id, ts_event, bests);
+                                if let Some(fr) = self.flow.as_mut() {
+                                    if fr.instrument() == instrument_id {
+                                        let dist = if side == SIDE_BID {
+                                            bests.0.map(|b| b - price)
+                                        } else {
+                                            bests.1.map(|a| price - a)
+                                        };
+                                        fr.on_add(side, size, dist);
+                                        if let Some(conf) = link {
+                                            fr.on_refill(side, conf);
+                                        }
+                                    }
+                                }
                             }
                         }
                     }
@@ -549,6 +621,11 @@ impl Engine {
                     .entry(instrument_id)
                     .or_insert(0) += size as u64;
                 self.group.add_t(instrument_id, size as u64);
+                if let Some(fr) = self.flow.as_mut() {
+                    if fr.instrument() == instrument_id {
+                        fr.on_trade(side, size, price);
+                    }
+                }
             }
             b'F' => {
                 // F records ONLY update resting-order state (plan rule).
@@ -559,7 +636,13 @@ impl Engine {
                 self.counters.f_volume += size as u64;
                 self.group.add_f(instrument_id, size as u64);
                 let book = self.books.entry(instrument_id).or_default();
-                let (found, over) = book.record_fill(order_id, size, ts_event);
+                let (found, over, hidden) = book.record_fill(order_id, size, ts_event);
+                if let Some(fr) = self.flow.as_mut() {
+                    if fr.instrument() == instrument_id && found {
+                        // F side = the RESTING side receiving the execution
+                        fr.on_fill(side, size, hidden);
+                    }
+                }
                 if !found {
                     self.counters.f_volume_unattributed += size as u64;
                     self.incident(

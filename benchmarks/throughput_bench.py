@@ -24,13 +24,16 @@ from mbo_engine.engine import MboEngine  # noqa: E402
 from utilities.config import load_config  # noqa: E402
 
 
-def bench(cfg, date, lifecycle: bool):
+def bench(cfg, date, lifecycle: bool, flow_iid: int | None = None):
     runs = []
     for i in range(2):
         e = MboEngine(cfg, lifecycle=lifecycle)
+        if flow_iid is not None:
+            e.enable_flow(flow_iid)
         r = e.replay_date(date)
         runs.append((r, e.stats(), e.halted(), e.lifecycle_digest()))
-        tag = "book+lifecycle" if lifecycle else "book only     "
+        tag = ("book+lc+flow  " if flow_iid is not None
+               else "book+lifecycle" if lifecycle else "book only     ")
         print(f"[{tag}] run {i+1}: {r.records:,} records in {r.seconds:.2f}s "
               f"-> {r.events_per_sec:,.0f} ev/s, digest {r.digest:#x}")
     return runs
@@ -43,11 +46,20 @@ def main() -> int:
             else dt.date(2026, 1, 6))
     target = cfg.performance.sustained_events_per_sec
 
+    # Phase 3 config: flow primitives recorded for the front contract
+    probe = MboEngine(cfg, lifecycle=False)
+    probe.replay_date(date)
+    front = probe.front_instrument()
+
     results = {}
-    for lifecycle in (False, True):
-        (r1, s1, h1, l1), (r2, s2, h2, l2) = bench(cfg, date, lifecycle)
+    for key, lifecycle, flow_iid in (
+        ("book", False, None),
+        ("lifecycle", True, None),
+        ("flow", True, front),
+    ):
+        (r1, s1, h1, l1), (r2, s2, h2, l2) = bench(cfg, date, lifecycle, flow_iid)
         rate = min(r1.events_per_sec, r2.events_per_sec)
-        results[lifecycle] = {
+        results[key] = {
             "r1": r1,
             "r2": r2,
             "rate": rate,
@@ -65,33 +77,36 @@ def main() -> int:
     all_ok = all(v["sustained_ok"] and v["determinism_ok"]
                  for v in results.values())
 
+    NAMES = (
+        ("book", "Phase 1 (book)"),
+        ("lifecycle", "Phase 2 (book+lifecycle)"),
+        ("flow", "Phase 3 (book+lifecycle+flow)"),
+    )
     lines = [
         "# Throughput + determinism benchmark (Phase 0 CI)",
         "",
         f"Generated: {dt.datetime.now(dt.timezone.utc).isoformat(timespec='seconds')}",
-        f"Session: {date}  |  file records: {results[False]['r1'].records:,}",
+        f"Session: {date}  |  file records: {results['book']['r1'].records:,}",
         "",
         "| Engine | run | records | seconds | events/s | digest |",
         "|---|---|---|---|---|---|",
     ]
-    for lifecycle, name in ((False, "Phase 1 (book)"),
-                            (True, "Phase 2 (book+lifecycle)")):
-        v = results[lifecycle]
+    for key, name in NAMES:
+        v = results[key]
         for i, r in enumerate((v["r1"], v["r2"]), 1):
             lines.append(
                 f"| {name} | {i} | {r.records:,} | {r.seconds:.2f} | "
                 f"{r.events_per_sec:,.0f} | `{r.digest:#x}` |"
             )
     lines += [""]
-    for lifecycle, name in ((False, "Phase 1 (book)"),
-                            (True, "Phase 2 (book+lifecycle)")):
-        v = results[lifecycle]
+    for key, name in NAMES:
+        v = results[key]
         lines += [
             f"- **{name}** sustained (target {target:,} ev/s single core): "
             f"**{'PASS' if v['sustained_ok'] else 'FAIL'}** "
             f"({v['rate']/target:.0f}x target)",
             f"- **{name}** replay-twice determinism (state digest + full "
-            f"stats{' + lifecycle digest' if lifecycle else ''}): "
+            f"stats{' + lifecycle digest' if key != 'book' else ''}): "
             f"**{'PASS' if v['determinism_ok'] else 'FAIL'}**",
         ]
     lines += [

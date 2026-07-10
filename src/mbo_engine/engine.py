@@ -187,3 +187,30 @@ class MboEngine:
             name: np.frombuffer(buf, dtype=np.dtype(dt))
             for name, dt, buf in self._core.lifecycle_drain()
         }
+
+    # -- Phase 3: per-group flow primitives ----------------------------------
+
+    def enable_flow(self, instrument_id: int) -> None:
+        """Record per-matching-event-group flow primitives for one
+        instrument (config [features]; requires lifecycle tracking)."""
+        ft = self.cfg.features
+        tick_units = int(round(float(self.cfg.raw["costs"]["tick_size_pts"]) / PRICE_SCALE))
+        self._core.enable_flow(
+            instrument_id,
+            tick_units,
+            ft.near_touch_ticks,
+            ft.book_levels,
+        )
+
+    def flow_stats(self) -> tuple[int, int] | None:
+        """(rows buffered, groups emitted total) or None if not enabled."""
+        return self._core.flow_stats()
+
+    def flow_drain(self) -> dict[str, "np.ndarray"]:
+        """Take buffered flow-primitive rows as numpy column arrays."""
+        import numpy as np
+
+        return {
+            name: np.frombuffer(buf, dtype=np.dtype(dt))
+            for name, dt, buf in self._core.flow_drain()
+        }

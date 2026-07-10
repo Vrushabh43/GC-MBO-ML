@@ -89,6 +89,33 @@ april_2026_to_present = "BLOCKED: requires Databento API key; price via metadata
 # pure-Python cross-check + Phase 1 suite. Phase 1 is NOT MBP-10-verified.
 mbp10_verification_days = "DEFERRED (2026-07-09): if ever purchased, 2-3 days each from 2017, 2020, 2023, 2025, Q1 2026 (R1 defense)"
 
+[features]
+# Phase 3 — core order-flow features (plan Phase 3, Steps 7-12).
+# The compiled core emits one row of per-matching-event-group PRIMITIVES
+# (facts: T-only volumes, adds/pulls at & near best, per-level OFI
+# ingredients, depth aggregates, lifecycle terminations, refill links) for
+# the tracked contract; all FEATURES are composed in Python by a streaming
+# engine whose step() is the single code path for historical and live
+# (Critical Rule 3). Raw values only in Phase 3 — the _norm twins are
+# attached by Phase 4A.
+near_touch_ticks = 5                        # "near the touch" band for add/pull flow
+book_levels = 10                            # MLOFI / depth aggregation levels (plan: 1-10)
+# rolling windows (seconds) used by the Phase 3 feature set; every feature
+# states which window(s) it uses. Short = tactical flow, mid = structure,
+# long = baseline for intensity/impact normalizers within a session.
+window_short_s = 2.0
+window_mid_s = 10.0
+window_long_s = 60.0
+# sweep detection: a group consuming >= this many ticks of one side
+sweep_min_ticks = 2
+# sweep failure/reclaim lookback horizon
+sweep_reclaim_s = 10.0
+# a sweep counts as failed when this fraction of its move is retraced
+sweep_failed_retrace = 0.8
+# iceberg-probability softening constant k in n/(n+k) (v1 heuristic shape)
+iceberg_softening = 4.0
+flow_dir = "data/processed/flow"            # optional per-session primitive dumps
+
 [lifecycle]
 # Phase 2 — order lifecycle and queue engine (plan Phase 2 + Step 6).
 enabled = true

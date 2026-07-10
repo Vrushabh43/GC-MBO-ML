@@ -7,6 +7,7 @@
 
 mod book;
 mod engine;
+mod flow;
 mod lifecycle;
 mod types;
 
@@ -17,6 +18,7 @@ use pyo3::types::PyBytes;
 use dbn::decode::DecodeRecordRef;
 
 use engine::Engine;
+use flow::FlowConfig;
 use lifecycle::LifecycleConfig;
 use types::{SIDE_ASK, SIDE_BID};
 
@@ -334,6 +336,160 @@ impl MboEngine {
             .lifecycle
             .as_ref()
             .map(|t| (t.emitted, t.links_made, t.refill_slots))
+    }
+
+    // -- Phase 3: per-group flow primitives --------------------------------
+
+    /// Enable flow-primitive recording for one instrument (requires
+    /// lifecycle=True). tick = one tick in fixed-point price units;
+    /// near_ticks = "near the touch" band; levels = book depth tracked.
+    #[pyo3(signature = (instrument_id, tick, near_ticks=5, levels=10))]
+    fn enable_flow(
+        &mut self,
+        instrument_id: u32,
+        tick: i64,
+        near_ticks: i64,
+        levels: usize,
+    ) -> PyResult<()> {
+        if !self.inner.enable_flow(FlowConfig {
+            instrument_id,
+            tick,
+            near_ticks,
+            levels,
+        }) {
+            return Err(PyValueError::new_err(
+                "flow recording requires lifecycle=True (termination/refill primitives)",
+            ));
+        }
+        Ok(())
+    }
+
+    /// Rows currently buffered / groups emitted in total.
+    fn flow_stats(&self) -> Option<(usize, u64)> {
+        self.inner
+            .flow
+            .as_ref()
+            .map(|f| (f.cols.len(), f.groups_emitted))
+    }
+
+    /// Drain buffered flow-primitive rows as raw little-endian column
+    /// buffers: [(column_name, numpy_dtype, bytes)]. The recorder keeps
+    /// running; call after finish() for a full session, or periodically.
+    fn flow_drain(&mut self, py: Python<'_>) -> PyResult<Vec<(String, String, Py<PyBytes>)>> {
+        let Some(fr) = self.inner.flow.as_mut() else {
+            return Err(PyValueError::new_err(
+                "flow recording is not enabled (call enable_flow first)",
+            ));
+        };
+        let levels = fr.cfg.levels;
+        let r = fr.drain();
+
+        fn b_u8(py: Python<'_>, v: &[u8]) -> Py<PyBytes> {
+            PyBytes::new(py, v).unbind()
+        }
+        macro_rules! b_le {
+            ($py:expr, $v:expr, $w:expr) => {{
+                let mut buf = Vec::with_capacity($v.len() * $w);
+                for x in $v.iter() {
+                    buf.extend_from_slice(&x.to_le_bytes());
+                }
+                PyBytes::new($py, &buf).unbind()
+            }};
+        }
+        let mut out: Vec<(String, String, Py<PyBytes>)> = vec![
+            ("ts".into(), "<u8".into(), b_le!(py, r.ts, 8)),
+            ("valid".into(), "u1".into(), b_u8(py, &r.valid)),
+            ("bid_px".into(), "<i8".into(), b_le!(py, r.bid_px, 8)),
+            ("ask_px".into(), "<i8".into(), b_le!(py, r.ask_px, 8)),
+            ("bid_sz".into(), "<u4".into(), b_le!(py, r.bid_sz, 4)),
+            ("ask_sz".into(), "<u4".into(), b_le!(py, r.ask_sz, 4)),
+            ("bid_ct".into(), "<u4".into(), b_le!(py, r.bid_ct, 4)),
+            ("ask_ct".into(), "<u4".into(), b_le!(py, r.ask_ct, 4)),
+            ("depth_b_near".into(), "<u4".into(), b_le!(py, r.depth_b_near, 4)),
+            ("depth_b_mid".into(), "<u4".into(), b_le!(py, r.depth_b_mid, 4)),
+            ("depth_b_deep".into(), "<u4".into(), b_le!(py, r.depth_b_deep, 4)),
+            ("depth_a_near".into(), "<u4".into(), b_le!(py, r.depth_a_near, 4)),
+            ("depth_a_mid".into(), "<u4".into(), b_le!(py, r.depth_a_mid, 4)),
+            ("depth_a_deep".into(), "<u4".into(), b_le!(py, r.depth_a_deep, 4)),
+        ];
+        for l in 0..levels {
+            out.push((
+                format!("flow_b_{}", l + 1),
+                "<i4".into(),
+                b_le!(py, r.flow_b[l], 4),
+            ));
+        }
+        for l in 0..levels {
+            out.push((
+                format!("flow_a_{}", l + 1),
+                "<i4".into(),
+                b_le!(py, r.flow_a[l], 4),
+            ));
+        }
+        out.extend::<Vec<(String, String, Py<PyBytes>)>>(vec![
+            ("t_buy".into(), "<u4".into(), b_le!(py, r.t_buy, 4)),
+            ("t_sell".into(), "<u4".into(), b_le!(py, r.t_sell, 4)),
+            ("t_buy_n".into(), "<u4".into(), b_le!(py, r.t_buy_n, 4)),
+            ("t_sell_n".into(), "<u4".into(), b_le!(py, r.t_sell_n, 4)),
+            ("t_px_high".into(), "<i8".into(), b_le!(py, r.t_px_high, 8)),
+            ("t_px_low".into(), "<i8".into(), b_le!(py, r.t_px_low, 8)),
+            ("add_best_b".into(), "<u4".into(), b_le!(py, r.add_best_b, 4)),
+            ("add_near_b".into(), "<u4".into(), b_le!(py, r.add_near_b, 4)),
+            ("pull_best_b".into(), "<u4".into(), b_le!(py, r.pull_best_b, 4)),
+            ("pull_near_b".into(), "<u4".into(), b_le!(py, r.pull_near_b, 4)),
+            ("add_best_a".into(), "<u4".into(), b_le!(py, r.add_best_a, 4)),
+            ("add_near_a".into(), "<u4".into(), b_le!(py, r.add_near_a, 4)),
+            ("pull_best_a".into(), "<u4".into(), b_le!(py, r.pull_best_a, 4)),
+            ("pull_near_a".into(), "<u4".into(), b_le!(py, r.pull_near_a, 4)),
+            ("fill_b".into(), "<u4".into(), b_le!(py, r.fill_b, 4)),
+            ("fill_a".into(), "<u4".into(), b_le!(py, r.fill_a, 4)),
+            ("hidden_b".into(), "<u4".into(), b_le!(py, r.hidden_b, 4)),
+            ("hidden_a".into(), "<u4".into(), b_le!(py, r.hidden_a, 4)),
+            ("term_filled".into(), "<u4".into(), b_le!(py, r.term_filled, 4)),
+            (
+                "term_pulled_touched".into(),
+                "<u4".into(),
+                b_le!(py, r.term_pulled_touched, 4),
+            ),
+            (
+                "term_pulled_untouched".into(),
+                "<u4".into(),
+                b_le!(py, r.term_pulled_untouched, 4),
+            ),
+            (
+                "term_filled_refill".into(),
+                "<u4".into(),
+                b_le!(py, r.term_filled_refill, 4),
+            ),
+            ("life_filled_sum".into(), "<u8".into(), b_le!(py, r.life_filled_sum, 8)),
+            ("life_pulled_sum".into(), "<u8".into(), b_le!(py, r.life_pulled_sum, 8)),
+            (
+                "term_filled_unchained".into(),
+                "<u4".into(),
+                b_le!(py, r.term_filled_unchained, 4),
+            ),
+            (
+                "life_filled_unchained_sum".into(),
+                "<u8".into(),
+                b_le!(py, r.life_filled_unchained_sum, 8),
+            ),
+            (
+                "term_pulled_unchained".into(),
+                "<u4".into(),
+                b_le!(py, r.term_pulled_unchained, 4),
+            ),
+            (
+                "life_pulled_unchained_sum".into(),
+                "<u8".into(),
+                b_le!(py, r.life_pulled_unchained_sum, 8),
+            ),
+            ("refill_b".into(), "<u4".into(), b_le!(py, r.refill_b, 4)),
+            ("refill_a".into(), "<u4".into(), b_le!(py, r.refill_a, 4)),
+            ("refill_conf_sum".into(), "<f4".into(), b_le!(py, r.refill_conf_sum, 4)),
+            ("age_best_b".into(), "<u8".into(), b_le!(py, r.age_best_b, 8)),
+            ("age_best_a".into(), "<u8".into(), b_le!(py, r.age_best_a, 8)),
+        ]);
+        Ok(out)
     }
 
     /// Drain completed lifecycle records as raw little-endian column

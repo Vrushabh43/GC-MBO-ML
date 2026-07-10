@@ -174,16 +174,19 @@ impl InstrumentBook {
     /// Record an execution against a resting order. Per verified GLBX
     /// semantics this NEVER mutates the book — the explicit follow-up C/M
     /// record performs the removal/reduction. Returns
-    /// (found, unapplied_fill_exceeds_size).
-    pub fn record_fill(&mut self, order_id: u64, fill_size: u32, ts: u64) -> (bool, bool) {
+    /// (found, unapplied_fill_exceeds_size, hidden_quantity) where hidden
+    /// is the single-fill excess over the displayed size (iceberg
+    /// execution signature, a Phase 3 flow primitive).
+    pub fn record_fill(&mut self, order_id: u64, fill_size: u32, ts: u64) -> (bool, bool, u32) {
         let Some(o) = self.orders.get_mut(&order_id) else {
-            return (false, false);
+            return (false, false, 0);
         };
+        let hidden = fill_size.saturating_sub(o.current_size);
         o.filled_size = o.filled_size.saturating_add(fill_size);
         o.unapplied_fill = o.unapplied_fill.saturating_add(fill_size);
         o.last_fill_ts = ts;
         o.state = OrderState::PartiallyFilled;
-        (true, o.unapplied_fill > o.current_size)
+        (true, o.unapplied_fill > o.current_size, hidden)
     }
 
     pub fn best_bid(&self) -> Option<(i64, &Level)> {

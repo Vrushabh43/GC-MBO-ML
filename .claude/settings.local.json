@@ -30,7 +30,11 @@
       "Bash(.venv/bin/pytest tests/test_lifecycle_synthetic.py -q)",
       "Bash(.venv/bin/pytest tests/test_lifecycle_real.py -q)",
       "Bash(.venv/bin/pytest tests/ -q)",
-      "Bash(echo \"demo exit: $?\")"
+      "Bash(echo \"demo exit: $?\")",
+      "Bash(.venv/bin/pytest tests/test_features_synthetic.py -q)",
+      "Bash(.venv/bin/pytest tests/test_features_synthetic.py::TestPriceProgress::test_signed_progress_and_efficiency -q)",
+      "Bash(.venv/bin/pytest tests/test_features_synthetic.py::TestPullingStacking -q)",
+      "Bash(.venv/bin/pytest tests/test_features_real.py -q)"
     ]
   }
 }

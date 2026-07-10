@@ -288,8 +288,8 @@ impl Tracker {
     }
 
     /// New order entered the book (A, or unknown-M treated as add).
-    /// `bests` is the post-insertion book state. Returns the chain link made
-    /// for this order, if any (for tests/diagnostics).
+    /// `bests` is the post-insertion book state. Returns the confidence of
+    /// the iceberg-chain link made for this order, if any.
     #[allow(clippy::too_many_arguments)]
     pub fn on_add(
         &mut self,
@@ -300,7 +300,7 @@ impl Tracker {
         vol_ahead_at_add: u64,
         bests: Bests,
         entered_unknown_modify: bool,
-    ) {
+    ) -> Option<f32> {
         let window = self.cfg.iceberg_window_ns;
         let tol = self.cfg.iceberg_clip_tol;
         let t = self.by_instrument.entry(iid).or_default();
@@ -360,6 +360,7 @@ impl Tracker {
                 link_dt_ns: chain.3,
             },
         );
+        (chain.1 > 0).then_some(chain.2)
     }
 
     /// Modify observed (known order). `fill_application` marks an M that
@@ -418,6 +419,8 @@ impl Tracker {
 
     /// Order left the book. `o` is the order as removed; `bests` must be the
     /// book state BEFORE removal (the order still counted in the market).
+    /// Returns (final_state, touched, is_refill_link, lifetime_ns) so the
+    /// flow recorder can tally terminations without recomputation.
     #[allow(clippy::too_many_arguments)]
     pub fn on_terminate(
         &mut self,
@@ -428,7 +431,7 @@ impl Tracker {
         queue_pos_at_term: u32,
         ts: u64,
         bests: Bests,
-    ) {
+    ) -> (u8, bool, bool, u64) {
         let t = self.by_instrument.entry(iid).or_default();
         let mut l = t.live.remove(&order_id).unwrap_or_else(|| Live {
             // order predates tracking (never happens after a clean open, but
@@ -548,6 +551,13 @@ impl Tracker {
         h.write_u64(l.chain_id);
         h.write_u64(l.chain_index as u64);
         h.write_u64(l.link_dt_ns);
+
+        (
+            state,
+            l.min_dist_same <= 0 || o.filled_size > 0,
+            l.chain_index > 0,
+            ts.saturating_sub(o.ts_added),
+        )
     }
 
     /// Book clear (R): all lifecycle state for the instrument resets; the

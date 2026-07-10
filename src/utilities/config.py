@@ -72,12 +72,29 @@ class LifecycleConfig:
 
 
 @dataclass(frozen=True)
+class FeaturesConfig:
+    """Phase 3 core order-flow feature settings."""
+
+    near_touch_ticks: int
+    book_levels: int
+    window_short_s: float
+    window_mid_s: float
+    window_long_s: float
+    sweep_min_ticks: int
+    sweep_reclaim_s: float
+    sweep_failed_retrace: float
+    iceberg_softening: float
+    flow_dir: Path
+
+
+@dataclass(frozen=True)
 class Config:
     data: DataConfig
     storage: StorageConfig
     performance: PerformanceConfig
     engine: EngineConfig
     lifecycle: LifecycleConfig
+    features: FeaturesConfig
     raw: dict[str, Any] = field(repr=False, default_factory=dict)
 
 
@@ -97,6 +114,7 @@ def load_config(path: Path | None = None) -> Config:
     perf = raw["performance"]
     e = raw["engine"]
     lc = raw["lifecycle"]
+    ft = raw["features"]
 
     def rp(rel: str) -> Path:
         q = Path(rel)
@@ -145,6 +163,18 @@ def load_config(path: Path | None = None) -> Config:
             iceberg_link_window_ns=lc["iceberg_link_window_ns"],
             iceberg_clip_tolerance=lc["iceberg_clip_tolerance"],
             lifecycle_dir=rp(lc["lifecycle_dir"]),
+        ),
+        features=FeaturesConfig(
+            near_touch_ticks=ft["near_touch_ticks"],
+            book_levels=ft["book_levels"],
+            window_short_s=ft["window_short_s"],
+            window_mid_s=ft["window_mid_s"],
+            window_long_s=ft["window_long_s"],
+            sweep_min_ticks=ft["sweep_min_ticks"],
+            sweep_reclaim_s=ft["sweep_reclaim_s"],
+            sweep_failed_retrace=ft["sweep_failed_retrace"],
+            iceberg_softening=ft["iceberg_softening"],
+            flow_dir=rp(ft["flow_dir"]),
         ),
         raw=raw,
     )

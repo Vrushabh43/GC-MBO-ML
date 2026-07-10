@@ -27,8 +27,9 @@ identical code path for historical research and live operation.
 | **Phase 1: MBO engine** (order store, book, T/F rule, invariants) | ✅ Built + 33 tests passing, ~4.5M ev/s, deterministic — [`reports/phase1_completion_report.md`](reports/phase1_completion_report.md) |
 | Phase 1 MBP-10 cross-check | ⚠️ **Deferred** (user decision 2026-07-09): out of scope / not yet purchased. Interim R1 defense = independent pure-Python cross-check. Phase 1 is **not MBP-10 snapshot-verified**. |
 | April 2026+ backfill | ⏳ Not yet purchased |
-| **Phase 2: order lifecycle + queue engine** (lifecycle records, FIFO queue positions, iceberg chains) | ✅ Complete — 81 tests total, ~2.9M ev/s with tracking, deterministic — [`reports/phase2_completion_report.md`](reports/phase2_completion_report.md) |
-| Phase 3: core order-flow features | ⏳ Next |
+| **Phase 2: order lifecycle + queue engine** (lifecycle records, FIFO queue positions, iceberg chains) | ✅ Complete — ~2.9M ev/s with tracking, deterministic — [`reports/phase2_completion_report.md`](reports/phase2_completion_report.md) |
+| **Phase 3: core order-flow features** (19 features: delta→absorption→MLOFI/sweeps/iceberg/…, unit+property+visual each) | ✅ Complete — 120 tests total, ~1.2M ev/s full recording — [`reports/phase3_completion_report.md`](reports/phase3_completion_report.md) |
+| Step 12.5: economic calendar + roll ledger | ⏳ Next |
 
 ## Repository layout
 
