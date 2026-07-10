@@ -29,7 +29,9 @@ identical code path for historical research and live operation.
 | April 2026+ backfill | ⏳ Not yet purchased |
 | **Phase 2: order lifecycle + queue engine** (lifecycle records, FIFO queue positions, iceberg chains) | ✅ Complete — ~2.9M ev/s with tracking, deterministic — [`reports/phase2_completion_report.md`](reports/phase2_completion_report.md) |
 | **Phase 3: core order-flow features** (19 features: delta→absorption→MLOFI/sweeps/iceberg/…, unit+property+visual each) | ✅ Complete — 120 tests total, ~1.2M ev/s full recording — [`reports/phase3_completion_report.md`](reports/phase3_completion_report.md) |
-| Step 12.5: economic calendar + roll ledger | ⏳ Next |
+| **Step 12.5: economic calendar + roll ledger** (45 rolls verified over 2,774 sessions; FOMC events seeded) | ✅ Complete — 140 tests total — [`reports/step12_5_completion_report.md`](reports/step12_5_completion_report.md) |
+| Macro release calendar (CPI/NFP/PPI/PCE/GDP/auctions) | ⚠️ Pending external data — needed before Phase 7 labels ([`data/calendar/README.md`](data/calendar/README.md)) |
+| Phase 4/4A: normalization architecture | ⏳ Next |
 
 ## Repository layout
 

@@ -67,6 +67,14 @@ max_incident_records = 10000                # ring buffer of detailed incidents 
 # Phase 1 contract-roll policy (full ledger emitted at Step 12.5).
 rule = "volume_cross"                       # roll when next month volume > front for N consecutive sessions
 volume_cross_sessions = 2
+# Step 12.5 artifacts: per-session volume scans + the active-contract ledger
+scan_dir = "data/processed/roll_scan"
+ledger_file = "data/calendar/contract_ledger.parquet"
+# GC termination of trading: third-to-last business day of the delivery
+# month. v1 business-day rule = weekdays (CME holiday calendar not yet
+# ingested; documented approximation, affects days_to_expiry by <=1-2 days
+# around holidays, never the roll decision which is volume-driven).
+expiry_rule = "third_last_business_day"
 
 [costs]
 # Physical facts — NEVER normalized (Critical Rule 21).
@@ -115,6 +123,26 @@ sweep_failed_retrace = 0.8
 # iceberg-probability softening constant k in n/(n+k) (v1 heuristic shape)
 iceberg_softening = 4.0
 flow_dir = "data/processed/flow"            # optional per-session primitive dumps
+
+[calendar]
+# Step 12.5 / plan Phase 4.5 — economic calendar and event-risk module.
+# Scheduled-release data is an EXTERNAL, VERSIONED input (CSV; see
+# data/calendar/README.md for the schema). Using the schedule at time t is
+# calendar knowledge, not leakage — release TIMES are known in advance;
+# realized values are never used.
+events_file = "data/calendar/events.csv"
+tz = "America/New_York"                     # CME/COMEX reference clock (DST-aware)
+# session phases, minutes since midnight ET (Globex metals):
+# maintenance 17:00-18:00, Asia 18:00-03:00, London 03:00-08:20,
+# NY 08:20-13:30 (COMEX floor hours), post-settlement 13:30-17:00
+phase_boundaries = { maintenance_start = "17:00", asia_start = "18:00", london_start = "03:00", ny_start = "08:20", post_start = "13:30" }
+settlement_window = { start = "13:29", end = "13:30" }   # COMEX gold settlement
+# live blackout around HIGH-impact releases (plan defaults)
+blackout_pre_s = 120
+blackout_post_s = 300
+# label hygiene (plan Phase 4.5): windows overlapping releases
+label_policy_high = "exclude"
+label_policy_medium = "tag"
 
 [lifecycle]
 # Phase 2 — order lifecycle and queue engine (plan Phase 2 + Step 6).

@@ -19,6 +19,11 @@ data/**
 !data/raw_mbo/KNOWN_GAPS.md
 !data/raw_mbo/download_archive.log
 !data/raw_mbo/job_metadata/**/*.json
+# versioned calendar dataset (plan Phase 4.5): external event data +
+# schema doc are tracked; the contract ledger parquet is derived
+# (rebuildable: scan_archive_volumes.py + build_roll_ledger.py)
+!data/calendar/README.md
+!data/calendar/*.csv
 
 # Safety net: raw/processed market-data files anywhere in the repo
 *.dbn

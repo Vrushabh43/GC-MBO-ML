@@ -34,7 +34,10 @@
       "Bash(.venv/bin/pytest tests/test_features_synthetic.py -q)",
       "Bash(.venv/bin/pytest tests/test_features_synthetic.py::TestPriceProgress::test_signed_progress_and_efficiency -q)",
       "Bash(.venv/bin/pytest tests/test_features_synthetic.py::TestPullingStacking -q)",
-      "Bash(.venv/bin/pytest tests/test_features_real.py -q)"
+      "Bash(.venv/bin/pytest tests/test_features_real.py -q)",
+      "Bash(.venv/bin/pytest tests/test_calendar.py -q)",
+      "WebFetch(domain:www.federalreserve.gov)",
+      "Bash(echo \"ledger gate exit: $?\")"
     ]
   }
 }

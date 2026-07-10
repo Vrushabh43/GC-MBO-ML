@@ -555,9 +555,40 @@ impl MboEngine {
     }
 }
 
+/// Lean full-file scan for the Step 12.5 roll ledger: per-instrument
+/// (records, T volume) with no book maintenance. Same decoder as replay
+/// (one code path for reading), GIL released. Returns rows sorted by
+/// instrument_id: [(instrument_id, records, t_volume)].
+#[pyfunction]
+fn scan_t_volumes(py: Python<'_>, path: &str) -> PyResult<Vec<(u32, u64, u64)>> {
+    let path = path.to_owned();
+    py.detach(move || {
+        let mut dec = dbn::decode::dbn::Decoder::from_zstd_file(&path)
+            .map_err(|e| PyIOError::new_err(format!("open {}: {}", path, e)))?;
+        let mut acc: std::collections::BTreeMap<u32, (u64, u64)> = std::collections::BTreeMap::new();
+        loop {
+            match dec.decode_record_ref() {
+                Ok(Some(rec)) => {
+                    if let Some(m) = rec.get::<dbn::MboMsg>() {
+                        let e = acc.entry(m.hd.instrument_id).or_insert((0, 0));
+                        e.0 += 1;
+                        if m.action as u8 == b'T' {
+                            e.1 += m.size as u64;
+                        }
+                    }
+                }
+                Ok(None) => break,
+                Err(e) => return Err(PyIOError::new_err(format!("decode error: {}", e))),
+            }
+        }
+        Ok(acc.into_iter().map(|(iid, (n, v))| (iid, n, v)).collect())
+    })
+}
+
 #[pymodule]
 fn gc_core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<MboEngine>()?;
+    m.add_function(wrap_pyfunction!(scan_t_volumes, m)?)?;
     m.add("UNDEF_PRICE", types::UNDEF_PRICE)?;
     m.add("F_LAST", types::F_LAST)?;
     m.add("F_SNAPSHOT", types::F_SNAPSHOT)?;
