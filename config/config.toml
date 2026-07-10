@@ -152,6 +152,24 @@ trade_burst_intensity_s = 3600
 [normalization.robust_z]
 liquidity_age_bid_s = 3600
 
+[inputs]
+# Phase 5 — final model input architecture (Steps 13-17). The five inputs
+# are assembled by ONE streaming consumer (same step() historical/live).
+# 1,024 / 64 / 256 are the plan's configurable starting values.
+event_window = 1024                         # input 1: last N matching events
+bar_events = 64                             # input 2: meaningful events per adaptive bar
+bar_max_duration_s = 15.0                   # ... with a max-duration close rule
+bar_window = 256                            # last N bars
+tactical_steps = 300                        # input 3: 5 min at 1 s
+tactical_step_s = 1.0
+slow_steps = 180                            # input 4: 30 min at 10 s
+slow_step_s = 10.0
+# input 5: percentile comparison windows (seconds; session = trailing 24h cap)
+regime_windows_s = [60, 300, 900, 3600, 86400]
+# input-standardization layer (plan 4A; statistics are FIT in Phase 8 on
+# the training set and serialized with the model bundle)
+winsorize_bound = 8.0
+
 [calendar]
 # Step 12.5 / plan Phase 4.5 — economic calendar and event-risk module.
 # Scheduled-release data is an EXTERNAL, VERSIONED input (CSV; see

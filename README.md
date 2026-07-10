@@ -32,7 +32,8 @@ identical code path for historical research and live operation.
 | **Step 12.5: economic calendar + roll ledger** (45 rolls verified over 2,774 sessions; FOMC events seeded) | ✅ Complete — 140 tests total — [`reports/step12_5_completion_report.md`](reports/step12_5_completion_report.md) |
 | Macro release calendar (CPI/NFP/PPI/PCE/GDP/auctions) | ⚠️ Pending external data — needed before Phase 7 labels ([`data/calendar/README.md`](data/calendar/README.md)) |
 | **Phase 4/4A: normalization architecture** (sigma_h/v_scale/d_scale, `_norm` twins, percentiles, era-invariance verified) | ✅ Complete — 165 tests total — [`reports/phase4_completion_report.md`](reports/phase4_completion_report.md) |
-| Phase 5: model input architecture (Steps 13–17) | ⏳ Next |
+| **Phase 5: model input architecture** (event stream 1024×22, flow bars 256×30, tactical 300×23, slow 180×15, regime 71 + standardization layer) | ✅ Complete — 191 tests total — [`reports/phase5_completion_report.md`](reports/phase5_completion_report.md) |
+| Phase 6: labels + sample index (Steps 18–19) | ⏳ Next (needs macro calendar for label hygiene) |
 
 ## Repository layout
 

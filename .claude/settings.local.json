@@ -40,7 +40,11 @@
       "Bash(echo \"ledger gate exit: $?\")",
       "Bash(.venv/bin/pytest tests/test_normalization_synthetic.py -q)",
       "Bash(.venv/bin/pytest tests/test_normalization_real.py -q)",
-      "Bash(.venv/bin/pytest tests/test_normalization_synthetic.py tests/test_normalization_real.py -q)"
+      "Bash(.venv/bin/pytest tests/test_normalization_synthetic.py tests/test_normalization_real.py -q)",
+      "Bash(.venv/bin/pytest tests/test_inputs_synthetic.py -q)",
+      "Bash(.venv/bin/pytest tests/test_inputs_real.py -q)",
+      "Bash(.venv/bin/pytest tests/test_inputs_real.py::TestStandardizerOnRealTensors::test_fit_transform_real_tactical -q)",
+      "Bash(.venv/bin/pytest tests/test_inputs_real.py tests/test_inputs_synthetic.py -q)"
     ]
   }
 }
