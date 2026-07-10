@@ -41,10 +41,19 @@ def _ratio(num: float, den: float, neutral: float = 0.0) -> float:
 
 
 class FeatureEngine:
-    """Streaming composition of the Phase 3 feature set."""
+    """Streaming composition of the Phase 3 feature set.
 
-    def __init__(self, cfg: Config) -> None:
+    `sigma_provider` (Phase 4A hook): a callable returning the current
+    past-only sigma scale in POINTS, or None while warming up. When given,
+    composite scores use sigma-NORMALIZED distance ingredients (plan 4A
+    rule 3 — composites from normalized ingredients); without it (or during
+    warm-up) raw tick distances are the documented fallback.
+    """
+
+    def __init__(self, cfg: Config, sigma_provider=None) -> None:
         ft = cfg.features
+        self.sigma_provider = sigma_provider
+        self.tick_pts = float(cfg.raw["costs"]["tick_size_pts"])
         self.tick = float(cfg.raw["costs"]["tick_size_pts"]) / 1e-9
         self.s = int(ft.window_short_s * NS)
         self.m = int(ft.window_mid_s * NS)
@@ -331,7 +340,15 @@ class FeatureEngine:
         exp_buy = self.t_buy_l.sum * (self.s / self.l)
         burst_sell = _ratio(self.t_sell_s.sum, self.t_sell_s.sum + exp_sell, 0.0)
         burst_buy = _ratio(self.t_buy_s.sum, self.t_buy_s.sum + exp_buy, 0.0)
-        stall = 1.0 / (1.0 + abs(out["price_progress_ticks_s"]))
+        # stall ingredient: |Δmid| in sigma units when the Phase 4A scale is
+        # warm (composites from NORMALIZED ingredients, plan 4A rule 3);
+        # raw ticks are the warm-up / standalone fallback
+        move = abs(out["price_progress_ticks_s"])
+        if self.sigma_provider is not None:
+            _sig = self.sigma_provider()
+            if _sig is not None and _sig > 0:
+                move = move * self.tick_pts / _sig
+        stall = 1.0 / (1.0 + move)
         hold_bid = _ratio(
             self.add_best_b_s.sum,
             self.add_best_b_s.sum + self.fill_b_s.sum + self.pull_best_b_s.sum,

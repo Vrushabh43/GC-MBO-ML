@@ -31,7 +31,8 @@ identical code path for historical research and live operation.
 | **Phase 3: core order-flow features** (19 features: delta→absorption→MLOFI/sweeps/iceberg/…, unit+property+visual each) | ✅ Complete — 120 tests total, ~1.2M ev/s full recording — [`reports/phase3_completion_report.md`](reports/phase3_completion_report.md) |
 | **Step 12.5: economic calendar + roll ledger** (45 rolls verified over 2,774 sessions; FOMC events seeded) | ✅ Complete — 140 tests total — [`reports/step12_5_completion_report.md`](reports/step12_5_completion_report.md) |
 | Macro release calendar (CPI/NFP/PPI/PCE/GDP/auctions) | ⚠️ Pending external data — needed before Phase 7 labels ([`data/calendar/README.md`](data/calendar/README.md)) |
-| Phase 4/4A: normalization architecture | ⏳ Next |
+| **Phase 4/4A: normalization architecture** (sigma_h/v_scale/d_scale, `_norm` twins, percentiles, era-invariance verified) | ✅ Complete — 165 tests total — [`reports/phase4_completion_report.md`](reports/phase4_completion_report.md) |
+| Phase 5: model input architecture (Steps 13–17) | ⏳ Next |
 
 ## Repository layout
 

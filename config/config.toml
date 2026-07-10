@@ -124,6 +124,34 @@ sweep_failed_retrace = 0.8
 iceberg_softening = 4.0
 flow_dir = "data/processed/flow"            # optional per-session primitive dumps
 
+[normalization]
+# Phase 4/4A — the canonical normalization architecture. Three rolling,
+# strictly past-only, robust (median) scales, reset at session boundaries
+# (the 18:00-ET trading-day anchor — every daily file contains the
+# 17:00-18:00 ET maintenance break) and at contract rolls; computed
+# identically historical/live; stored alongside what they normalize.
+scale_window_s = 3600                       # trailing 60 min (plan default)
+sample_period_s = 1                         # scales update on a 1-second past-only clock
+sigma_horizons_s = [30, 120, 600]           # sigma_h for h = 30s / 2m / 10m (Phase 7)
+# which sigma_h normalizes FEATURE distances (labels use their own h;
+# decision documented in the Phase 4 report):
+distance_sigma_horizon_s = 120
+d_scale_levels = 5                          # top-5 depth, combined sides (plan default)
+d_scale_sides = "combined"
+min_samples = 30                            # warm-up: _norm = NaN until each scale has this many samples
+# rolling-percentile features (plan Phase 4; past-only, window never spans
+# a session boundary). Format: feature = window_seconds.
+[normalization.percentiles]
+absorption_net_s = 3600                     # plan's example: absorption percentile, 60m
+spread_ticks = 3600                         # spread regime widening (do-not-normalize list)
+trade_burst_intensity_s = 3600
+
+# robust z-scores ((x - median)/MAD, streaming, past-only). Default: only
+# demonstration coverage — the 4A scale twins already handle volumes and
+# distances; z-scores serve quantities without a canonical scale.
+[normalization.robust_z]
+liquidity_age_bid_s = 3600
+
 [calendar]
 # Step 12.5 / plan Phase 4.5 — economic calendar and event-risk module.
 # Scheduled-release data is an EXTERNAL, VERSIONED input (CSV; see
