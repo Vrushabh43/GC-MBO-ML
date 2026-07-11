@@ -279,6 +279,7 @@ class NormalizedFeatureEngine:
         self.z_spec = {k: int(v) for k, v in n.get("robust_z", {}).items()}
         self._session: dt.date | None = None
         self._sid_sec: int | None = None  # per-second session-id cache
+        self._pct_sec: int | None = None  # internal 1-Hz percentile clock
         self._make_percentiles()
         self.names = None  # populated on first step
 
@@ -296,7 +297,18 @@ class NormalizedFeatureEngine:
         t = dt.datetime.fromtimestamp(ts / NS, tz=dt.timezone.utc).astimezone(self.tz)
         return (t - dt.timedelta(hours=18)).date()
 
+    # step() = ingest() + compose(): live and historical share step();
+    # batch drivers ingest per row and compose only at sample instants.
+    # Percentile/robust-z trackers are pushed on an INTERNAL 1-second clock
+    # (a snapshot of the state as of the previous row when a second
+    # completes) so their contents are independent of compose cadence —
+    # the train/serve parity requirement for these features.
+
     def step(self, cols: dict, i: int) -> dict[str, float]:
+        self.ingest(cols, i)
+        return self.compose()
+
+    def ingest(self, cols: dict, i: int) -> None:
         ts = int(cols["ts"][i])
         sec = ts // NS
         if sec != self._sid_sec:
@@ -309,8 +321,16 @@ class NormalizedFeatureEngine:
             self._session = sid
             self.scales.reset()
             self._make_percentiles()
+            self._pct_sec = sec
+        elif self._pct_sec is None:
+            self._pct_sec = sec
+        elif sec != self._pct_sec:
+            # a second completed inside the session: snapshot the state as
+            # of the previous row and feed the percentile/z trackers
+            self._push_percentiles(self.compose())
+            self._pct_sec = sec
 
-        out = self.fe.step(cols, i)
+        self.fe.ingest(cols, i)
 
         depth = None
         if cols["valid"][i]:
@@ -320,10 +340,29 @@ class NormalizedFeatureEngine:
             )
         self.scales.step(
             ts,
-            out["mid_ticks"],
+            self.fe._last_mid,
             float(cols["t_buy"][i] + cols["t_sell"][i]),
             depth,
         )
+
+    def _push_percentiles(self, snap: dict[str, float]) -> None:
+        ts = int(snap["ts"])
+        for key in ("sigma_dist", "v_scale", "d_scale"):
+            v = snap[key]
+            if not math.isnan(v):
+                self.scale_pct[key].push(ts, v)
+        for name, tracker in self.pct.items():
+            v = snap[name]
+            if not math.isnan(v):
+                tracker.push(ts, v)
+        for name, z in self.zsc.items():
+            v = snap[name]
+            if not math.isnan(v):
+                z.push(ts, v)
+
+    def compose(self) -> dict[str, float]:
+        """Normalized feature vector from current state (pure read)."""
+        out = self.fe.compose()
 
         sig = self.scales.sigma_dist()
         v = self.scales.v_scale()
@@ -356,14 +395,12 @@ class NormalizedFeatureEngine:
             out["price_impact_m_norm"] = nan
 
         # the scales themselves (regime information): raw + past-only pct
+        # (trackers are fed by the internal 1-second clock, never here)
         for key, val in (("sigma_dist", sig), ("v_scale", v), ("d_scale", d)):
             out[key] = val if val is not None else nan
-            p = self.scale_pct[key]
-            if val is not None:
-                out[f"{key}_pct"] = p.percentile(val)
-                p.push(ts, val)
-            else:
-                out[f"{key}_pct"] = nan
+            out[f"{key}_pct"] = (
+                self.scale_pct[key].percentile(val) if val is not None else nan
+            )
         for h in self.scales.horizons:
             s = self.scales.sigma(h)
             out[f"sigma_{h}s"] = s if s is not None else nan
@@ -371,33 +408,28 @@ class NormalizedFeatureEngine:
             sig is not None and v is not None and d is not None
         )
 
-        # Phase 4 rolling-percentile features (past-only: query then push)
+        # Phase 4 rolling-percentile / robust-z features (queries only;
+        # trackers are fed on the internal 1-second clock in ingest)
         for name, tracker in self.pct.items():
-            val = out[name]
-            out[f"{name}_pctile"] = tracker.percentile(val)
-            if not math.isnan(val):
-                tracker.push(ts, val)
-        # Phase 4 robust z-scores (config list; same past-only convention)
+            out[f"{name}_pctile"] = tracker.percentile(out[name])
         for name, z in self.zsc.items():
-            val = out[name]
-            out[f"{name}_rz"] = z.zscore(val)
-            if not math.isnan(val):
-                z.push(ts, val)
+            out[f"{name}_rz"] = z.zscore(out[name])
 
         if self.names is None:
             self.names = list(out.keys())
         return out
 
     def run(self, cols: dict, sample_every_ns: int = 0):
-        """Historical driver over the SAME step() (Critical Rule 3)."""
+        """Historical driver: ingest every row through the same code the
+        live path uses; compose (pure read) only at kept instants."""
         n = len(cols["ts"])
         kept: list[dict[str, float]] = []
         next_keep = 0
         for i in range(n):
-            out = self.step(cols, i)
+            self.ingest(cols, i)
             ts = int(cols["ts"][i])
             if sample_every_ns == 0 or ts >= next_keep or i == n - 1:
-                kept.append(out)
+                kept.append(self.compose())
                 if sample_every_ns:
                     next_keep = ts + sample_every_ns
         return self.names, kept

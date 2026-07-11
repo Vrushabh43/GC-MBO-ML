@@ -204,6 +204,80 @@ trigger_vacuum = 0.9                        # max(liquidity_vacuum up/down)
 trigger_replenish = 0.98                    # max(replenish bid/ask)
 sample_index_dir = "data/sample_index"
 
+[gate]
+# ============================================================================
+# STEP 20 GO/NO-GO GATE — PRE-REGISTERED 2026-07-11, BEFORE ANY TRAINING.
+# Plan Phase 8: "Record the gate criteria in config before training so they
+# cannot be moved after seeing results." DO NOT EDIT AFTER THIS DATE except
+# to append results; the gate decision uses THESE values.
+# ============================================================================
+# Model A: LightGBM multiclass (NO_TRADE/BULLISH/BEARISH), 30 s horizon ONLY,
+# engineered features at sample instants (_norm variants; mid_ticks excluded
+# as an absolute-price era proxy). Fixed seed; deterministic single-thread
+# histogram building.
+horizon_s = 30
+seed = 20260711
+# out-of-sample evaluation period (inside the frozen VALIDATE year; the
+# frozen test 2025 and holdout Q1-2026 remain untouched):
+oos_start = 2024-01-02
+oos_end = 2024-03-28                        # ~61 trading days >= plan's 20
+# training-window variants (plan Phase 0 / Step 20), all ending 2023-12-31,
+# purged + embargoed against the OOS period per [splits]:
+variant_12m_start = 2023-01-01
+variant_3y_start = 2021-01-01
+variant_full_start = 2017-05-21
+train_end = 2023-12-31
+# uniqueness weighting: BOTH variants trained (plan Phase 6 "test both");
+# the gate passes if ANY (window x weighting) combination meets ALL criteria.
+#
+# --- PRE-REGISTERED PASS CRITERIA (ALL must hold for a combination) --------
+# 1. ECONOMIC: mean expectancy of top-decile-confidence directional
+#    predictions, after the [labels] cost model, > 0 points on OOS, with
+#    trades on >= 20 distinct sessions. (Expectancy proxy: mid-based
+#    30 s final return signed by predicted direction, minus the round-trip
+#    cost — conservative and identical for all combinations.)
+min_trade_sessions = 20
+top_confidence_decile = 0.9
+# 2. STATISTICAL: direction discrimination meaningfully above chance —
+#    one-vs-rest ROC-AUC (mean of BULLISH and BEARISH) >= 0.55 on OOS, AND
+#    multiclass Brier score at least 2% (relative) better than the
+#    unconditional class-frequency baseline.
+min_auc = 0.55
+min_brier_improvement = 0.02
+# 3. ROBUSTNESS: the edge is not concentration — top-decile expectancy
+#    stays > 0 (a) with the single best session removed, and (b) with all
+#    release-tagged sessions removed.
+# ---------------------------------------------------------------------------
+# --- data-prep methodology (appended 2026-07-11, still BEFORE training) ----
+# training rows per session are capped by uniform striding of CLOCK samples
+# (event-triggered samples always kept) so the full-history variant fits in
+# RAM; evaluation runs on the FULL-resolution OOS index. Features: all f_*
+# columns except f_mid_ticks (absolute price = era proxy). Fixed LightGBM
+# params in src/models/model_a.py (no tuning loop — nothing to peek with).
+train_max_clock_rows_per_session = 12000
+# If the gate FAILS: iterate on features, labels, sampling (plan) — do NOT
+# escalate to Models B/C, and do NOT edit the criteria.
+#
+# --- RESULT (appended 2026-07-11; criteria above untouched) ----------------
+# VERDICT: NO-GO (reports/model_a_gate.md). All 6 combos: statistical
+# criteria PASS decisively (AUC 0.877-0.880, BrierΔ +5.5-5.7%); economic +
+# robustness expectancy FAIL (-0.193..-0.199 pts/trade after 0.2 pt cost).
+# Diagnosis: move-timing skill 0.880 AUC, sign skill 0.556 AUC — iterate on
+# sign-carrying features/labels/sampling per the plan; Models B/C stay off.
+
+[splits]
+# Phase 9 — purged + embargoed splitting (never merely chronological,
+# NEVER shuffled). The outer split is FROZEN (v2.4; do not change):
+frozen_train_end = 2023-12-31               # train 2017-2023 (COVID stratum tagged)
+frozen_val_end = 2024-12-31                 # validate 2024
+frozen_test_end = 2025-12-31                # test 2025
+# final holdout: Q1 2026 — evaluated ONCE, at the very end (R7)
+# purging: training samples whose label window (label_end_ts) overlaps the
+# eval period are removed. Embargo: plan minimum = one max label horizon
+# (10 min); recommended and default = one full session.
+embargo_sessions = 1
+min_embargo_s = 600
+
 [calendar]
 # Step 12.5 / plan Phase 4.5 — economic calendar and event-risk module.
 # Scheduled-release data is an EXTERNAL, VERSIONED input (CSV; see

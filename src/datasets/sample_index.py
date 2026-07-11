@@ -122,27 +122,36 @@ def build_session_samples(
     trig = TriggerState(cfg)
     le = LabelEngine(cfg)
 
-    picked: list[tuple[int, str, dict]] = []  # (ts, trigger, sigma_by_h)
+    # Selection evaluates at HALF-SECOND slots: the row that opens a new
+    # second is the ~1 Hz clock candidate; the row that opens its second
+    # half is the event-trigger candidate (the plan's event-triggered EXTRA
+    # samples; min-spacing 0.5 s admits at most one extra per second).
+    # compose() is a pure read, so evaluating at slots instead of every row
+    # changes only the event-trigger evaluation instants (documented).
+    picked: list[tuple[int, str, dict, dict]] = []  # (ts, trigger, sigma_by_h, features)
     counts: dict[str, int] = defaultdict(int)
     last_ts = -(10**18)
-    last_sec = None
+    last_slot = None
     session_ids: list = []
+    half = NS // 2
     n = len(cols["ts"])
     for i in range(n):
-        out = nfe.step(cols, i)
+        nfe.ingest(cols, i)
         ts = int(cols["ts"][i])
+        slot = ts // half
+        if slot == last_slot:
+            continue
+        last_slot = slot
+        out = nfe.compose()
         active = out["norm_ready"] == 1.0
-        sec = ts // NS
         kind: str | None = None
-        if active and sec != last_sec:
-            kind = "clock"        # ~1 Hz base rate in active periods
-        elif active:
+        if slot % 2 == 0:  # second boundary -> clock candidate
+            if active:
+                kind = "clock"
+        else:  # mid-second -> event-trigger candidate
             k = trig.evaluate(out)
-            if k is not None and counts[k] < cap:
+            if active and k is not None and counts[k] < cap:
                 kind = k
-        else:
-            trig.evaluate(out)    # keep onset state warm while inactive
-        last_sec = sec if active else last_sec
         if kind is None or ts - last_ts < min_gap:
             continue
         counts[kind] += 1
@@ -152,6 +161,7 @@ def build_session_samples(
                 ts,
                 kind,
                 {h: out[f"sigma_{h}s"] for h in le.horizons},
+                out,  # Model A trains on the engineered vector at sample time
             )
         )
         session_ids.append(nfe._session)
@@ -160,8 +170,13 @@ def build_session_samples(
     path = build_second_path(cols)
     max_h = max(le.horizons)
     rows: list[dict] = []
-    for (ts, kind, sig), sid in zip(picked, session_ids, strict=True):
+    for (ts, kind, sig, feats), sid in zip(picked, session_ids, strict=True):
         r: dict = {"ts": ts, "trigger": kind, "session": sid}
+        # the feature vector AT the sample instant (past-only by
+        # construction), prefixed to keep feature/label columns disjoint
+        for k, v in feats.items():
+            if k != "ts":
+                r[f"f_{k}"] = v
         r.update(le.label_sample(path, ts, sig))
         end_ts = ts + max_h * NS
         r["label_end_ts"] = end_ts  # Phase 9 purging anchor
@@ -182,6 +197,15 @@ def build_session_samples(
         "by_trigger": dict(sorted(counts.items())),
         "label_metadata": le.metadata(),
     }
+    # horizon keys ALWAYS present (a degraded/short session can pick zero
+    # samples — the summary schema must not depend on that)
+    for h in le.horizons:
+        summary[f"h{h}"] = {
+            "trainable": 0,
+            "effective_n": 0.0,
+            "class_balance": {"no_trade": math.nan, "bullish": math.nan,
+                              "bearish": math.nan},
+        }
     if len(df):
         # a sample is TRAINABLE for horizon h when its window is complete,
         # in-session, not release-excluded, and sigma existed

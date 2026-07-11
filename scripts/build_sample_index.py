@@ -2,32 +2,78 @@
 date range) and write the effective-sample-size report the plan requires
 for every training set.
 
-Run:  .venv/bin/python scripts/build_sample_index.py [START END]
-Writes data/sample_index/samples-YYYYMMDD.parquet per session and
-reports/sample_index.md.
+Parallel (one session per worker, hardware profile ~10 workers) and
+RESUMABLE: existing outputs are skipped unless --force. Per-session
+summaries are cached beside the parquet so the report can always be
+rebuilt without recomputation.
+
+Run:  .venv/bin/python scripts/build_sample_index.py [START END] [--force] [workers=N]
+Writes data/sample_index/samples-YYYYMMDD.parquet (+ .summary.json) per
+session and reports/sample_index.md.
 """
 from __future__ import annotations
 
 import datetime as dt
+import json
 import sys
+from concurrent.futures import ProcessPoolExecutor, as_completed
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO / "src"))
 
 from databento_io.sessions import list_session_dates  # noqa: E402
-from datasets.sample_index import write_session_samples  # noqa: E402
 from utilities.config import load_config  # noqa: E402
+
+
+def build_one(date_iso: str) -> tuple[str, dict]:
+    """Worker: one session -> parquet + summary sidecar."""
+    from datasets.sample_index import write_session_samples
+
+    cfg = load_config()
+    date = dt.date.fromisoformat(date_iso)
+    p, _, summary = write_session_samples(date, cfg)
+    Path(str(p).replace(".parquet", ".summary.json")).write_text(
+        json.dumps(summary, default=str)
+    )
+    return date_iso, summary
 
 
 def main() -> int:
     cfg = load_config()
-    if len(sys.argv) > 2:
-        start, end = (dt.date.fromisoformat(a) for a in sys.argv[1:3])
+    args = [a for a in sys.argv[1:] if not a.startswith("--") and "=" not in a]
+    force = "--force" in sys.argv
+    workers = next(
+        (int(a.split("=")[1]) for a in sys.argv[1:] if a.startswith("workers=")),
+        cfg.performance.batch_workers,
+    )
+    if len(args) >= 2:
+        start, end = (dt.date.fromisoformat(a) for a in args[:2])
     else:
         start, end = cfg.data.dev_slice_start, cfg.data.dev_slice_end
     dates = list_session_dates(start, end, cfg)
 
+    out_dir = REPO / cfg.raw["samples"]["sample_index_dir"]
+    out_dir.mkdir(parents=True, exist_ok=True)
+    todo, summaries = [], {}
+    for d in dates:
+        sidecar = out_dir / f"samples-{d.strftime('%Y%m%d')}.summary.json"
+        if sidecar.exists() and not force:
+            summaries[str(d)] = json.loads(sidecar.read_text())
+        else:
+            todo.append(d)
+    print(f"{len(dates)} sessions, {len(todo)} to build, {workers} workers"
+          + (" (force)" if force else ""))
+
+    with ProcessPoolExecutor(max_workers=workers) as ex:
+        futs = {ex.submit(build_one, str(d)): d for d in todo}
+        for fut in as_completed(futs):
+            date_iso, s = fut.result()
+            summaries[date_iso] = s
+            print(f"{date_iso}: {s['picked']:,} samples, "
+                  f"h30 eff-N {s['h30']['effective_n']:,.0f}")
+
+    # ---------------- report ------------------------------------------------
     lines = [
         "# Sample index — effective-sample-size report (Step 19)",
         "",
@@ -39,11 +85,15 @@ def main() -> int:
         "h30 NT/BU/BE | h120 eff-N | h600 eff-N |",
         "|---|---|---|---|---|---|---|---|---|",
     ]
+    EMPTY = {"trainable": 0, "effective_n": 0.0,
+             "class_balance": {"no_trade": float("nan"), "bullish": float("nan"),
+                               "bearish": float("nan")}}
     tot = {30: [0, 0.0], 120: [0, 0.0], 600: [0, 0.0]}
-    n_rows = 0
     meta = None
     for d in dates:
-        p, df, s = write_session_samples(d, cfg)
+        s = summaries[str(d)]
+        for h in (30, 120, 600):  # zero-sample sessions (legacy sidecars)
+            s.setdefault(f"h{h}", dict(EMPTY))
         meta = s["label_metadata"]
         by = s["by_trigger"]
         ev = sum(v for k, v in by.items() if k != "clock")
@@ -54,12 +104,9 @@ def main() -> int:
             f"| {cb['no_trade']:.2f}/{cb['bullish']:.2f}/{cb['bearish']:.2f} "
             f"| {s['h120']['effective_n']:,.0f} | {s['h600']['effective_n']:,.0f} |"
         )
-        n_rows += s["picked"]
         for h in (30, 120, 600):
             tot[h][0] += s[f"h{h}"]["trainable"]
             tot[h][1] += s[f"h{h}"]["effective_n"]
-        print(f"{d}: {s['picked']:,} samples -> {p.name}")
-
     lines += [
         "",
         "## Totals — row count is NOT information count (plan Phase 6)",
@@ -69,7 +116,7 @@ def main() -> int:
     ]
     for h in (30, 120, 600):
         n, e = tot[h]
-        lines.append(f"| {h}s | {n:,} | {e:,.0f} | {e / max(n,1):.1%} |")
+        lines.append(f"| {h}s | {n:,} | {e:,.0f} | {e / max(n, 1):.1%} |")
     lines += [
         "",
         f"Label convention (stored with every file): `{meta}`",

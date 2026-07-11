@@ -143,6 +143,11 @@ class FeatureEngine:
         ]
 
     # -- the single step ------------------------------------------------------
+    #
+    # step() = ingest() + compose(). Live and historical both go through
+    # step(); batch drivers may call ingest() per row and compose() only at
+    # sample instants — compose is a PURE read of ingested state, so the
+    # result at any instant is identical either way (tested).
 
     def step(self, cols: dict, i: int) -> dict[str, float]:
         """Consume one flow-primitive row; return the current feature vector.
@@ -150,6 +155,11 @@ class FeatureEngine:
         `cols` maps column name -> array-like; `i` is the row index. Live
         processing passes length-1 columns with i=0 — same code, same path.
         """
+        self.ingest(cols, i)
+        return self.compose()
+
+    def ingest(self, cols: dict, i: int) -> None:
+        """Update all rolling state for one row (no output)."""
         ts = int(cols["ts"][i])
         tick = self.tick
 
@@ -289,7 +299,19 @@ class FeatureEngine:
                     sw["max_retrace"] = max(sw["max_retrace"], sweep_failure)
         self.failed_sweeps_l.evict(ts)
 
-        # ================= feature composition ================================
+        # row state consumed by compose() (instantaneous values)
+        self._row = (
+            ts, mid, spread, valid, bid_px, ask_px, bid_sz, ask_sz,
+            d_b_near, d_a_near, d_b_tot, d_a_tot, sweep_failure,
+            float(cols["age_best_b"][i]), float(cols["age_best_a"][i]),
+        )
+
+    def compose(self) -> dict[str, float]:
+        """Build the feature vector from current state (pure read)."""
+        (ts, mid, spread, valid, bid_px, ask_px, bid_sz, ask_sz,
+         d_b_near, d_a_near, d_b_tot, d_a_tot, sweep_failure,
+         age_b_ns, age_a_ns) = self._row
+        tick = self.tick
 
         out: dict[str, float] = {"ts": float(ts)}
         out["mid_ticks"] = mid if mid is not None else float("nan")
@@ -501,8 +523,8 @@ class FeatureEngine:
 
         # Liquidity Age: size-weighted age of the best level (seconds, raw)
         # + bounded age imbalance ([-1,1]; positive = older bid liquidity).
-        age_b = float(cols["age_best_b"][i]) / NS
-        age_a = float(cols["age_best_a"][i]) / NS
+        age_b = age_b_ns / NS
+        age_a = age_a_ns / NS
         out["liquidity_age_bid_s"] = age_b
         out["liquidity_age_ask_s"] = age_a
         out["liquidity_age_imbalance"] = _ratio(age_b - age_a, age_b + age_a, 0.0)
@@ -526,10 +548,10 @@ class FeatureEngine:
         kept: list[dict[str, float]] = []
         next_keep = 0
         for i in range(n):
-            out = self.step(cols, i)
+            self.ingest(cols, i)
             ts = int(cols["ts"][i])
             if sample_every_ns == 0 or ts >= next_keep or i == n - 1:
-                kept.append(out)
+                kept.append(self.compose())  # pure read of ingested state
                 if sample_every_ns:
                     next_keep = ts + sample_every_ns
         return self.names, kept

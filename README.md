@@ -34,7 +34,9 @@ identical code path for historical research and live operation.
 | **Phase 4/4A: normalization architecture** (sigma_h/v_scale/d_scale, `_norm` twins, percentiles, era-invariance verified) | ✅ Complete — 165 tests total — [`reports/phase4_completion_report.md`](reports/phase4_completion_report.md) |
 | **Phase 5: model input architecture** (event stream 1024×22, flow bars 256×30, tactical 300×23, slow 180×15, regime 71 + standardization layer) | ✅ Complete — 191 tests total — [`reports/phase5_completion_report.md`](reports/phase5_completion_report.md) |
 | **Phase 6: labels + sample index** (tradeable-price dual-unit labels; ~700k samples, effective-N 27k @30s) | ✅ Complete — 218 tests total — [`reports/phase6_completion_report.md`](reports/phase6_completion_report.md) |
-| Step 20: Model A baseline + **GO/NO-GO gate** | ⏳ Next — prerequisites: macro calendar ingestion, pipeline speed-up, purged-split machinery |
+| Step 20 prerequisites (macro calendar CPI/NFP/PPI ingested; pipeline ~190× faster; purged splits) | ✅ Complete — 227 tests total — [`reports/step20_prereqs_report.md`](reports/step20_prereqs_report.md) |
+| **Step 20: Model A + GO/NO-GO gate** (pre-registered; 6 combos on 85M samples 2017–2024) | ⚖️ **NO-GO** — move-timing AUC 0.88, sign AUC 0.556, expectancy < cost — [`reports/step20_completion_report.md`](reports/step20_completion_report.md) |
+| Iteration (plan-mandated): sign-carrying features / sampling / labels, then re-run the frozen gate | ⏳ Next — Models B/C stay off until the gate passes |
 
 ## Repository layout
 

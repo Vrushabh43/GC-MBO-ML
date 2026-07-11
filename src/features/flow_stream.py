@@ -34,10 +34,18 @@ class FlowSession:
 
 
 def front_instrument(date: dt.date, cfg: Config) -> int:
-    """Front contract by traded volume (Phase 1 rule) via a plain replay."""
-    e = MboEngine(cfg, lifecycle=False)
-    e.replay_date(date)
-    return e.front_instrument()
+    """ACTIVE contract for the session. Primary source: the Step 12.5 roll
+    ledger (the verified volume-cross rule — also enforces that features
+    never stitch across a roll). Fallback for dates outside the ledger:
+    volume leader via a plain replay (the Phase 1 rule)."""
+    try:
+        from calendar_mod.roll_ledger import RollLedger
+
+        return RollLedger.load(cfg).active(date).instrument_id
+    except (FileNotFoundError, KeyError):
+        e = MboEngine(cfg, lifecycle=False)
+        e.replay_date(date)
+        return e.front_instrument()
 
 
 def replay_session_flow(

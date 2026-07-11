@@ -48,7 +48,21 @@
       "Bash(.venv/bin/pytest tests/test_labels_synthetic.py -q)",
       "Bash(.venv/bin/pytest tests/test_samples_real.py -q)",
       "Bash(.venv/bin/pytest tests/test_samples_real.py tests/test_labels_synthetic.py -q)",
-      "Bash(awk '{print $3, $4, $10, $11, $12, $13}')"
+      "Bash(awk '{print $3, $4, $10, $11, $12, $13}')",
+      "WebFetch(domain:www.bls.gov)",
+      "Bash(curl *)",
+      "WebFetch(domain:web.archive.org)",
+      "Bash(grep -o \"cpi_[0-9]*.htm\\\\|[A-Z][a-z]*\\\\.\\\\? [0-9]\\\\{1,2\\\\}, [0-9]\\\\{4\\\\}\" cpi.html)",
+      "Bash(echo \"exit: $?\")",
+      "Bash(.venv/bin/pytest tests/test_calendar.py tests/test_inputs_real.py tests/test_samples_real.py -q)",
+      "Bash(awk -F: '$1 > 300 {print}')",
+      "Bash(.venv/bin/pytest tests/test_features_synthetic.py tests/test_normalization_synthetic.py tests/test_features_real.py tests/test_normalization_real.py -q)",
+      "Bash(.venv/bin/pytest tests/test_splits.py -q)",
+      "Bash(.venv/bin/pytest tests/test_labels_synthetic.py tests/test_samples_real.py tests/test_splits.py -q)",
+      "Bash(.venv/bin/pytest tests/test_model_a.py -q)",
+      "Bash(.venv/bin/pytest tests/test_model_a.py -q -p no:warnings)",
+      "Bash(dmesg -T)",
+      "Bash(.venv/bin/pytest tests/ -q -p no:warnings)"
     ]
   }
 }

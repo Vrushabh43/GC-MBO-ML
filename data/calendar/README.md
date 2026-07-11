@@ -22,10 +22,22 @@ Rules:
   this schema via `ingest_csv`; `events.csv` is the default merged file
   named in `config [calendar] events_file`.
 
-**Status: the macro release history (CPI, PPI, NFP, FOMC, PCE, GDP,
-Treasury auctions) is an EXTERNAL input and is NOT fully ingested yet.**
-The module treats missing coverage loudly (`coverage_warning`) so label
-hygiene can never silently run blind. Do not fabricate dates.
+**Status (2026-07-11):**
+
+| series | tier | coverage 2017–2026 | source |
+|---|---|---|---|
+| FOMC statements | high | 79 events, complete | federalreserve.gov (`events_fomc.csv`) |
+| CPI | high | 121 events, complete, gap-gated | BLS schedule pages via Wayback (`events_bls.csv`) |
+| Employment Situation (NFP) | high | 121 events, complete, gap-gated | BLS via Wayback |
+| PPI | medium | 121 events, complete (2018 backfilled from BLS monthly calendars) | BLS via Wayback |
+| GDP, PCE (BEA) | medium | **pending** | — |
+| Treasury auctions, FOMC minutes | medium/low | **pending** | — |
+
+The HIGH-impact set (drives label EXCLUSION and the live blackout) is
+complete. Pending series are tag-tier only. `fetch_bls_calendar.py`
+re-harvests with a coverage gate (>45-day holes fail the run); raw HTML
+snapshots are cached in `.bls_cache/` (gitignored). Do not fabricate
+dates; the loader's `coverage_warning` stays the loud guard.
 
 ## 2. Contract ledger — `contract_ledger.parquet`
 
