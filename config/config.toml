@@ -170,6 +170,40 @@ regime_windows_s = [60, 300, 900, 3600, 86400]
 # the training set and serialized with the model bundle)
 winsorize_bound = 8.0
 
+[labels]
+# Phase 6/7 — Step 18. Labels on TRADEABLE prices (plan Phase 7 [NEW]):
+# entry at the aggressive side (long: best ask, short: best bid), exits
+# marked at the touch of the opposite side (default convention; stored in
+# metadata). Horizons follow [normalization] sigma_horizons_s (Phase 7:
+# 30s primary / 2m secondary / 10m experimental).
+convention = "touch_opposite"
+# explicit cost model (physical facts, NEVER normalized — Critical Rule 21):
+# spread ~1 tick + slippage 0.5-1 tick + fees => 1.5-2.5 ticks round trip
+cost_round_trip_ticks = 2.0
+# direction classes: cost-adjusted favorable move must exceed this multiple
+# of the cost-adjusted adverse move (thresholds live in sigma units at
+# evaluation time — Critical Rule 21 / plan Phase 7)
+direction_ratio = 2.0
+# label path granularity: per-second bid/ask extremes (carry-forward
+# through quiet seconds — the resting book persists)
+path_resolution_s = 1
+
+[samples]
+# Phase 6 — Step 19. Sample index (index only; clock-time streams are
+# stored continuously — plan Phase 6).
+base_rate_hz = 1.0                          # ~1 sample/second in active periods
+min_spacing_s = 0.5                         # minimum spacing rule (any two samples)
+event_cap_per_type_per_session = 300        # event-trigger caps (plan Phase 6)
+# event triggers (evaluated per row on PAST-ONLY features; same pure
+# function live). Thresholds on the Phase 3/4 outputs:
+trigger_absorption_net = 0.35               # |absorption_net_s| onset crossing
+trigger_mlofi_norm = 5.0                    # |mlofi_near_s_norm|
+trigger_burst = 0.9                         # trade_burst_intensity_s
+trigger_depletion = 0.9                     # max(queue_depletion bid/ask)
+trigger_vacuum = 0.9                        # max(liquidity_vacuum up/down)
+trigger_replenish = 0.98                    # max(replenish bid/ask)
+sample_index_dir = "data/sample_index"
+
 [calendar]
 # Step 12.5 / plan Phase 4.5 — economic calendar and event-risk module.
 # Scheduled-release data is an EXTERNAL, VERSIONED input (CSV; see
