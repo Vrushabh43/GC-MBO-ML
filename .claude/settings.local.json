@@ -62,7 +62,17 @@
       "Bash(.venv/bin/pytest tests/test_model_a.py -q)",
       "Bash(.venv/bin/pytest tests/test_model_a.py -q -p no:warnings)",
       "Bash(dmesg -T)",
-      "Bash(.venv/bin/pytest tests/ -q -p no:warnings)"
+      "Bash(.venv/bin/pytest tests/ -q -p no:warnings)",
+      "Bash(.venv/bin/pytest tests/test_features_synthetic.py tests/test_normalization_synthetic.py -p no:warnings -q)",
+      "Bash(.venv/bin/pytest tests/test_features_synthetic.py tests/test_normalization_synthetic.py tests/test_model_a.py -p no:warnings -q)",
+      "Bash(.venv/bin/pytest tests/ -p no:warnings -q)",
+      "Bash(.venv/bin/pytest tests/ -p no:warnings)",
+      "Bash(.venv/bin/pytest tests/test_features_synthetic.py tests/test_model_a.py -p no:warnings --collect-only -q)",
+      "Bash(git stash *)",
+      "Bash(.venv/bin/pytest tests/ -p no:warnings --collect-only -q)",
+      "Bash(git -C /home/43e3/solr-home/GC status --short)",
+      "Bash(git -C /home/43e3/solr-home/GC stash list)",
+      "Bash(git *)"
     ]
   }
 }

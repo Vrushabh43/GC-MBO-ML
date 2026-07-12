@@ -61,6 +61,7 @@ SIGMA_TWINS = (
     "microprice_disp_ticks",
     "sweep_buy_ticks_m",
     "sweep_sell_ticks_m",
+    "sweep_net_ticks_m",  # Step 20 iteration signed set
 )
 # contract-denominated flow -> / (v_scale * window_seconds) [plan 4A rule 2]
 V_TWINS = (

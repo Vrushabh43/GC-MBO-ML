@@ -8,6 +8,8 @@ with the verdict plus the plan-required deliverables: gain + permutation
 importance, native TreeSHAP on top features, and per-family ablations.
 
 Run:  .venv/bin/python scripts/run_gate.py [--no-ablations] [--no-permutation]
+      [--out=NAME.md]   (default model_a_gate.md; gate iterations write a
+                         fresh report so every run's verdict stays on disk)
 """
 from __future__ import annotations
 
@@ -180,7 +182,11 @@ def main() -> int:
         "(src/models/model_a.py) | expectancy proxy + thinning: config [gate].",
         "",
     ]
-    out = REPO / "reports" / "model_a_gate.md"
+    out_name = next(
+        (a.split("=", 1)[1] for a in sys.argv[1:] if a.startswith("--out=")),
+        "model_a_gate.md",
+    )
+    out = REPO / "reports" / out_name
     out.write_text("\n".join(lines))
     print(f"\nVERDICT: {verdict}\nreport -> {out}")
     return 0

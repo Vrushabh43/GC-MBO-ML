@@ -36,7 +36,8 @@ identical code path for historical research and live operation.
 | **Phase 6: labels + sample index** (tradeable-price dual-unit labels; ~700k samples, effective-N 27k @30s) | ✅ Complete — 218 tests total — [`reports/phase6_completion_report.md`](reports/phase6_completion_report.md) |
 | Step 20 prerequisites (macro calendar CPI/NFP/PPI ingested; pipeline ~190× faster; purged splits) | ✅ Complete — 227 tests total — [`reports/step20_prereqs_report.md`](reports/step20_prereqs_report.md) |
 | **Step 20: Model A + GO/NO-GO gate** (pre-registered; 6 combos on 85M samples 2017–2024) | ⚖️ **NO-GO** — move-timing AUC 0.88, sign AUC 0.556, expectancy < cost — [`reports/step20_completion_report.md`](reports/step20_completion_report.md) |
-| Iteration (plan-mandated): sign-carrying features / sampling / labels, then re-run the frozen gate | ⏳ Next — Models B/C stay off until the gate passes |
+| **Gate iteration 2: signed_v2 features** (20 sign-carrying features; sign-skill harness; frozen gate re-run) | ⚖️ **NO-GO again** — sign AUC 0.556→0.559, ceiling ≈0.58 (full history); feature lever exhausted — [`reports/gate_iteration2_report.md`](reports/gate_iteration2_report.md) |
+| Next iteration levers: sampling/labels per plan — or new *information* (cross-market, macro tag tiers), a scope decision | ⏳ Awaiting direction — Models B/C stay off until the gate passes |
 
 ## Repository layout
 

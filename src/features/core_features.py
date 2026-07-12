@@ -18,7 +18,9 @@ window_mid_s / window_long_s config values (defaults 2 s / 10 s / 60 s).
 Sign conventions:
   - buy/bid-supportive pressure is positive where a feature is signed
     (aggr_delta*, mlofi*, book_imbalance*, absorption_net, stacking_net,
-    microprice_disp_ticks: micro above mid = buy pressure = positive).
+    microprice_disp_ticks: micro above mid = buy pressure = positive; the
+    whole Step 20-iteration signed-asymmetry set: flow/fill/hidden/pull
+    imbalances, side tilts, signed sweep features).
   - bounded scores live in [0, 1] (or [-1, 1] for signed ratios); ratio
     features with an empty window emit their neutral value (documented per
     formula) so downstream code never sees NaN.
@@ -105,9 +107,13 @@ class FeatureEngine:
         self.fill_b_l, self.fill_a_l = w(self.l), w(self.l)
         # sweeps
         self.sweep_buy_m, self.sweep_sell_m = w(self.m), w(self.m)
-        self.failed_sweeps_l = w(self.l)
+        self.failed_sweeps_l = w(self.l)  # pushes are SIGNED sweep dirs (±1)
         self._sweep: dict | None = None  # active sweep state
         self._last_mid: float | None = None  # ticks
+        # signed-asymmetry set (Step 20 gate iteration): absolute depth-flow
+        # magnitudes, denominators of the bounded flow-imbalance ratios
+        self.absflow_1_s = w(self.s)
+        self.absflow_near_s, self.absflow_near_m = w(self.s), w(self.m)
 
         self.names: list[str] = [
             # reference
@@ -140,6 +146,15 @@ class FeatureEngine:
             "queue_turnover_bid_m", "queue_turnover_ask_m",
             "order_lifetime_ms_l", "order_lifetime_chain_adj_ms_l",
             "liquidity_age_bid_s", "liquidity_age_ask_s", "liquidity_age_imbalance",
+            # Step 20 gate iteration — signed-asymmetry set (positive =
+            # buy/bid-supportive; bounded except sweep_net_ticks_m)
+            "flow_imbalance_1_s", "flow_imbalance_near_s", "flow_imbalance_near_m",
+            "fill_imbalance_s", "fill_imbalance_m", "hidden_fill_imbalance_l",
+            "iceberg_asym_l", "pull_imbalance_m",
+            "vacuum_tilt", "resiliency_tilt", "depletion_tilt_s",
+            "replenish_tilt_m", "turnover_tilt_m",
+            "book_imbalance_outer", "imbalance_tilt", "depth_concentration_tilt",
+            "sweep_net_ticks_m", "sweep_failure_signed", "failed_sweep_net_ratio_l",
         ]
 
     # -- the single step ------------------------------------------------------
@@ -221,13 +236,22 @@ class FeatureEngine:
 
         # ---- ingest: MLOFI ingredients (bid flow − ask flow per band) -------
         near = mid_band = deep = 0.0
+        near_abs = 0.0
         for l in range(1, 4):
-            near += float(cols[f"flow_b_{l}"][i]) - float(cols[f"flow_a_{l}"][i])
+            fb = float(cols[f"flow_b_{l}"][i])
+            fa = float(cols[f"flow_a_{l}"][i])
+            near += fb - fa
+            near_abs += abs(fb) + abs(fa)
         for l in range(4, 7):
             mid_band += float(cols[f"flow_b_{l}"][i]) - float(cols[f"flow_a_{l}"][i])
         for l in range(7, 11):
             deep += float(cols[f"flow_b_{l}"][i]) - float(cols[f"flow_a_{l}"][i])
-        lvl1 = float(cols["flow_b_1"][i]) - float(cols["flow_a_1"][i])
+        fb1 = float(cols["flow_b_1"][i])
+        fa1 = float(cols["flow_a_1"][i])
+        lvl1 = fb1 - fa1
+        self.absflow_1_s.push(ts, abs(fb1) + abs(fa1))
+        self.absflow_near_s.push(ts, near_abs)
+        self.absflow_near_m.push(ts, near_abs)
         self.mlofi_1_s.push(ts, lvl1)
         self.mlofi_near_s.push(ts, near)
         self.mlofi_near_m.push(ts, near)
@@ -287,6 +311,7 @@ class FeatureEngine:
             self.sweep_sell_m.evict(ts)
 
         sweep_failure = 0.0
+        sweep_failure_signed = 0.0
         if self._sweep is not None:
             sw = self._sweep
             if ts - sw["ts"] > self.reclaim_ns:
@@ -297,6 +322,9 @@ class FeatureEngine:
                     retrace = (sw["extreme"] - mid) if sw["dir"] > 0 else (mid - sw["extreme"])
                     sweep_failure = min(max(retrace / move, 0.0), 1.0)
                     sw["max_retrace"] = max(sw["max_retrace"], sweep_failure)
+                    # reclaim points AGAINST the sweep: a failing buy sweep
+                    # is bearish (negative), a failing sell sweep bullish
+                    sweep_failure_signed = -sw["dir"] * sweep_failure
         self.failed_sweeps_l.evict(ts)
 
         # row state consumed by compose() (instantaneous values)
@@ -304,13 +332,14 @@ class FeatureEngine:
             ts, mid, spread, valid, bid_px, ask_px, bid_sz, ask_sz,
             d_b_near, d_a_near, d_b_tot, d_a_tot, sweep_failure,
             float(cols["age_best_b"][i]), float(cols["age_best_a"][i]),
+            sweep_failure_signed,
         )
 
     def compose(self) -> dict[str, float]:
         """Build the feature vector from current state (pure read)."""
         (ts, mid, spread, valid, bid_px, ask_px, bid_sz, ask_sz,
          d_b_near, d_a_near, d_b_tot, d_a_tot, sweep_failure,
-         age_b_ns, age_a_ns) = self._row
+         age_b_ns, age_a_ns, sweep_failure_signed) = self._row
         tick = self.tick
 
         out: dict[str, float] = {"ts": float(ts)}
@@ -529,15 +558,87 @@ class FeatureEngine:
         out["liquidity_age_ask_s"] = age_a
         out["liquidity_age_imbalance"] = _ratio(age_b - age_a, age_b + age_a, 0.0)
 
+        # ---- Step 20 gate iteration: signed-asymmetry set --------------------
+        # The Step 20 diagnosis: move-timing AUC 0.880, sign AUC 0.556 — the
+        # set below exposes the SIGN content of ingredients the v1 features
+        # mostly emitted as magnitudes or per-side pairs. All positive =
+        # buy/bid-supportive; bounded [-1,1] (dimensionless, do-not-normalize)
+        # except sweep_net_ticks_m (tick distance -> sigma twin in Phase 4A).
+
+        # signed depth-flow imbalance as a bounded ratio: net flow over gross
+        # flow magnitude — scale-free, so trees see sign, not volume regime
+        out["flow_imbalance_1_s"] = _ratio(self.mlofi_1_s.sum, self.absflow_1_s.sum, 0.0)
+        out["flow_imbalance_near_s"] = _ratio(
+            self.mlofi_near_s.sum, self.absflow_near_s.sum, 0.0
+        )
+        out["flow_imbalance_near_m"] = _ratio(
+            self.mlofi_near_m.sum, self.absflow_near_m.sum, 0.0
+        )
+
+        # execution-side imbalance: resting-ask fills = aggressive buying
+        out["fill_imbalance_s"] = _ratio(
+            self.fill_a_s.sum - self.fill_b_s.sum,
+            self.fill_a_s.sum + self.fill_b_s.sum, 0.0,
+        )
+        out["fill_imbalance_m"] = _ratio(
+            self.fill_a_m.sum - self.fill_b_m.sum,
+            self.fill_a_m.sum + self.fill_b_m.sum, 0.0,
+        )
+        # hidden executions on the BID side = hidden buyer absorbing sells
+        out["hidden_fill_imbalance_l"] = _ratio(
+            self.hidden_b_l.sum - self.hidden_a_l.sum,
+            self.hidden_b_l.sum + self.hidden_a_l.sum, 0.0,
+        )
+        # iceberg presence asymmetry (bid-side hidden replenishment = support)
+        out["iceberg_asym_l"] = out["iceberg_score_bid_l"] - out["iceberg_score_ask_l"]
+
+        # ask-side liquidity fleeing (pulls at/near the touch) = upside vacuum
+        pull_a = self.pull_best_a_m.sum + self.pull_near_a_m.sum
+        pull_b = self.pull_best_b_m.sum + self.pull_near_b_m.sum
+        out["pull_imbalance_m"] = _ratio(pull_a - pull_b, pull_a + pull_b, 0.0)
+
+        # side tilts of existing per-side scores (each term already [0,1])
+        out["vacuum_tilt"] = out["liquidity_vacuum_up"] - out["liquidity_vacuum_down"]
+        out["resiliency_tilt"] = out["book_resiliency_bid"] - out["book_resiliency_ask"]
+        out["depletion_tilt_s"] = (
+            out["queue_depletion_ask_s"] - out["queue_depletion_bid_s"]
+        )
+        out["replenish_tilt_m"] = out["replenish_bid_m"] - out["replenish_ask_m"]
+        out["turnover_tilt_m"] = out["queue_turnover_bid_m"] - out["queue_turnover_ask_m"]
+
+        # book-shape sign: imbalance beyond the near band, its tilt vs the
+        # near band, and near-band depth concentration per side
+        d_b_outer = d_b_tot - d_b_near
+        d_a_outer = d_a_tot - d_a_near
+        out["book_imbalance_outer"] = _ratio(
+            d_b_outer - d_a_outer, d_b_outer + d_a_outer, 0.0
+        )
+        out["imbalance_tilt"] = out["book_imbalance_near"] - out["book_imbalance_outer"]
+        out["depth_concentration_tilt"] = _ratio(d_b_near, d_b_tot, 0.5) - _ratio(
+            d_a_near, d_a_tot, 0.5
+        )
+
+        # signed sweep set: net swept ticks, the running reclaim AGAINST the
+        # active sweep, and the mean direction of recent failed sweeps
+        # (failed SELL sweeps = bullish reclaim, hence the negation)
+        out["sweep_net_ticks_m"] = self.sweep_buy_m.sum - self.sweep_sell_m.sum
+        out["sweep_failure_signed"] = sweep_failure_signed
+        out["failed_sweep_net_ratio_l"] = -_ratio(
+            self.failed_sweeps_l.sum, float(len(self.failed_sweeps_l.buf)), 0.0
+        )
+
         return out
 
     # -- helpers ---------------------------------------------------------------
 
     def _resolve_sweep(self, ts: int) -> None:
-        """Close the active sweep; count it as failed if enough retraced."""
+        """Close the active sweep; count it as failed if enough retraced.
+        The pushed value is the sweep's SIGNED direction (±1): the buffer
+        length is still the failed-sweep count (failed_sweeps_l feature),
+        while the sum carries direction (failed_sweep_net_ratio_l)."""
         sw = self._sweep
         if sw is not None and sw["max_retrace"] >= self.failed_retrace:
-            self.failed_sweeps_l.push(ts, 1.0)
+            self.failed_sweeps_l.push(ts, sw["dir"])
         self._sweep = None
 
     def run(self, cols: dict, sample_every_ns: int = 0):

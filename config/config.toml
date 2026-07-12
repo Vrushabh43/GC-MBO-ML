@@ -308,3 +308,14 @@ enabled = true
 iceberg_link_window_ns = 2000000            # 2 ms default per plan
 iceberg_clip_tolerance = 1.0                # child size <= tol * parent displayed clip
 lifecycle_dir = "data/processed/lifecycle"  # per-session Parquet output
+# --- RESULT: ITERATION 2 (appended 2026-07-12; criteria above untouched) ---
+# Sign-carrying feature iteration (signed_v2, 20 features; plan-mandated
+# "iterate on features" after the Step 20 NO-GO). Same frozen criteria,
+# same data prep, same seed. VERDICT: NO-GO again
+# (reports/model_a_gate_iter2.md): AUC 0.877-0.880, BrierΔ +5.5-5.7%,
+# expectancy -0.192..-0.198 pts/trade — all statistically PASS /
+# economically FAIL, unchanged. Sign AUC 0.556 -> 0.559. Diagnostic
+# (reports/sign_diagnostic_*.md): full-history binary sign ceiling 0.580 at
+# 30 s; sign skill DECAYS with horizon; signed_v2 alone reproduces the v1
+# sign signal. The FEATURE lever within current MBO primitives is
+# exhausted; next levers are sampling/labels. Models B/C stay off.

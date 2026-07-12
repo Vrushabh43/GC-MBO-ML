@@ -115,6 +115,22 @@ class TestLoading:
         unassigned = [f for f in feats if family_of(f) == "other"]
         assert not unassigned, unassigned
 
+    def test_signed_v2_family_wins_prefix_clashes(self):
+        # the gate-iteration signed set must ablate as ONE family, including
+        # names that share a prefix with their v1 parent family
+        for name in ("f_book_imbalance_outer", "f_sweep_net_ticks_m",
+                     "f_sweep_net_ticks_m_norm", "f_sweep_failure_signed",
+                     "f_failed_sweep_net_ratio_l", "f_flow_imbalance_near_s",
+                     "f_fill_imbalance_m", "f_hidden_fill_imbalance_l",
+                     "f_iceberg_asym_l", "f_vacuum_tilt", "f_imbalance_tilt",
+                     "f_depth_concentration_tilt"):
+            assert family_of(name) == "signed_v2", name
+        # ...and the v1 parents keep their own families
+        assert family_of("f_book_imbalance_near") == "book_imbalance"
+        assert family_of("f_sweep_buy_ticks_m") == "sweeps"
+        assert family_of("f_sweep_failure_score") == "sweeps"
+        assert family_of("f_iceberg_score_bid_l") == "iceberg"
+
 
 class TestEndToEndPlumbing:
     @pytest.fixture(scope="class")

@@ -405,6 +405,180 @@ class TestDepthShape:
         assert rows[-1]["book_resiliency_bid"] == pytest.approx(1.0)
 
 
+class TestSignedAsymmetrySet:
+    """Step 20 gate-iteration signed features: sign correctness by
+    construction, boundedness, neutral values, volume invariance."""
+
+    def test_flow_imbalance_mixed_sign_known(self):
+        e = engine()
+        book(e, sz=10)  # first emission: flows are zeros (prev_top empty)
+        e.push(2 * S, "A", "B", 100 * PX, 5, 51, LAST)   # level-1 bid +5
+        e.push(3 * S, "A", "A", int(100.1 * PX), 10, 52, LAST)  # level-1 ask +10
+        out = feats(drain(e))[-1]
+        # net = +5 - 10 = -5, gross = 15 -> -1/3 (sell-supportive, bounded)
+        assert out["flow_imbalance_1_s"] == pytest.approx(-1 / 3)
+        assert out["flow_imbalance_near_s"] == pytest.approx(-1 / 3)
+        assert -1.0 <= out["flow_imbalance_near_m"] <= 1.0
+
+    def test_fill_imbalance_sell_pressure_negative(self):
+        e = engine()
+        book(e, sz=25)
+        # 20 lots execute against the BID (aggressive selling)
+        e.push(2 * S, "T", "A", 100 * PX, 20, 0)
+        e.push(2 * S, "F", "B", 100 * PX, 20, 9001)
+        e.push(2 * S, "M", "B", 100 * PX, 5, 9001, LAST)
+        out = feats(drain(e))[-1]
+        assert out["fill_imbalance_s"] == pytest.approx(-1.0)
+        assert out["fill_imbalance_m"] == pytest.approx(-1.0)
+        # bid side being eaten -> depletion tilt negative (sell-supportive)
+        assert out["depletion_tilt_s"] == pytest.approx(0.0 - 20 / 25)
+
+    def test_hidden_and_iceberg_asymmetry(self):
+        e = engine()
+        book(e, sz=2)
+        # fill 10 against displayed 2 on the BID -> hidden 8 on the bid side
+        e.push(2 * S, "T", "A", 100 * PX, 10, 0)
+        e.push(2 * S, "F", "B", 100 * PX, 10, 9001)
+        e.push(2 * S, "C", "B", 100 * PX, 2, 9001, LAST)
+        out = feats(drain(e))[-1]
+        assert out["hidden_fill_imbalance_l"] == pytest.approx(1.0)
+        assert out["iceberg_asym_l"] == pytest.approx(8 / 18)  # bid 8/18, ask 0
+
+    def test_pull_imbalance_ask_fleeing_positive(self):
+        e = engine()
+        book(e)
+        e.push(2 * S, "A", "A", int(100.2 * PX), 20, 41, LAST)  # near-touch ask
+        e.push(3 * S, "C", "A", int(100.2 * PX), 20, 41, LAST)  # ...pulled
+        out = feats(drain(e))[-1]
+        assert out["pull_imbalance_m"] == pytest.approx(1.0)
+
+    def test_replenish_and_turnover_tilts_match_parents(self):
+        e = engine()
+        book(e, sz=10)
+        e.push(2 * S, "A", "B", 100 * PX, 10, 11, LAST)
+        e.push(3 * S, "C", "B", 100 * PX, 10, 11, LAST)
+        out = feats(drain(e))[-1]
+        assert out["replenish_tilt_m"] == pytest.approx(
+            out["replenish_bid_m"] - out["replenish_ask_m"]
+        )
+        assert out["turnover_tilt_m"] == pytest.approx(
+            out["queue_turnover_bid_m"] - out["queue_turnover_ask_m"]
+        )
+        assert out["turnover_tilt_m"] > 0  # all churn was on the bid
+
+    def test_book_shape_signed_known(self):
+        e = engine()
+        e.push(1_000, "A", "B", 100 * PX, 30, 1)               # bid: near 30
+        e.push(1_000, "A", "A", int(100.1 * PX), 10, 2)        # ask level 1
+        e.push(1_000, "A", "A", int(100.2 * PX), 10, 3)        # ask level 2
+        e.push(1_000, "A", "A", int(100.3 * PX), 10, 4)        # ask level 3
+        e.push(1_000, "A", "A", int(100.4 * PX), 30, 5, LAST)  # ask level 4 = outer
+        out = feats(drain(e))[-1]
+        # near: 30 vs 30 -> 0; outer: 0 vs 30 -> -1; tilt = 0 - (-1) = 1
+        assert out["book_imbalance_near"] == pytest.approx(0.0)
+        assert out["book_imbalance_outer"] == pytest.approx(-1.0)
+        assert out["imbalance_tilt"] == pytest.approx(1.0)
+        # concentration: bid 30/30 = 1, ask 30/60 = 0.5 -> +0.5
+        assert out["depth_concentration_tilt"] == pytest.approx(0.5)
+
+    def test_vacuum_and_resiliency_tilts(self):
+        e = engine()
+        e.push(1_000, "A", "B", 100 * PX, 10, 1)
+        e.push(1_000, "A", "A", int(100.1 * PX), 20, 2)
+        e.push(1_000, "A", "A", int(100.2 * PX), 20, 3, LAST)
+        for k in range(10):  # depth baseline rows
+            e.push((2 + k) * S, "A", "B", 99 * PX - k * TICK, 1, 100 + k, LAST)
+        e.push(15 * S, "C", "A", int(100.1 * PX), 20, 2, LAST)  # asks vanish
+        e.push(16 * S, "C", "A", int(100.2 * PX), 20, 3, LAST)
+        out = feats(drain(e))[-1]
+        assert out["vacuum_tilt"] == pytest.approx(
+            out["liquidity_vacuum_up"] - out["liquidity_vacuum_down"]
+        )
+        assert out["vacuum_tilt"] > 0.3  # thin above = upside vacuum
+        assert out["resiliency_tilt"] == pytest.approx(
+            out["book_resiliency_bid"] - out["book_resiliency_ask"]
+        )
+
+    def test_buy_sweep_reclaim_is_bearish_signed(self):
+        e = engine()
+        e.push(1_000, "A", "B", 100 * PX, 10, 1)
+        e.push(1_000, "A", "A", int(100.1 * PX), 5, 2)
+        e.push(1_000, "A", "A", int(100.2 * PX), 5, 3)
+        e.push(1_000, "A", "A", int(100.3 * PX), 5, 4, LAST)
+        # buy sweep through two ask levels in ONE matching event
+        e.push(2 * S, "T", "B", int(100.1 * PX), 5, 0)
+        e.push(2 * S, "F", "A", int(100.1 * PX), 5, 2)
+        e.push(2 * S, "C", "A", int(100.1 * PX), 5, 2)
+        e.push(2 * S, "T", "B", int(100.2 * PX), 5, 0)
+        e.push(2 * S, "F", "A", int(100.2 * PX), 5, 3)
+        e.push(2 * S, "C", "A", int(100.2 * PX), 5, 3, LAST)
+        e.push(3 * S, "A", "A", int(100.1 * PX), 5, 61, LAST)  # asks re-stack
+        e.push(20 * S, "A", "B", 90 * PX, 1, 62, LAST)  # close bookkeeping
+        rows = feats(drain(e))
+        swept = [r for r in rows if r["sweep_buy_ticks_m"] > 0]
+        assert swept and swept[0]["sweep_net_ticks_m"] == pytest.approx(1.0)
+        # reclaim AGAINST a buy sweep -> signed failure NEGATIVE (bearish)
+        assert min(r["sweep_failure_signed"] for r in rows) < -0.5
+        # the failed sweep was a BUY -> net ratio -1 (bearish)
+        assert rows[-1]["failed_sweeps_l"] == 1.0
+        assert rows[-1]["failed_sweep_net_ratio_l"] == pytest.approx(-1.0)
+
+    def test_sell_sweep_reclaim_is_bullish_signed(self):
+        e = engine()
+        e.push(1_000, "A", "A", int(100.1 * PX), 10, 1)
+        e.push(1_000, "A", "B", 100 * PX, 5, 2)
+        e.push(1_000, "A", "B", int(99.9 * PX), 5, 3)
+        e.push(1_000, "A", "B", int(99.8 * PX), 5, 4, LAST)
+        # sell sweep through two bid levels in ONE matching event
+        e.push(2 * S, "T", "A", 100 * PX, 5, 0)
+        e.push(2 * S, "F", "B", 100 * PX, 5, 2)
+        e.push(2 * S, "C", "B", 100 * PX, 5, 2)
+        e.push(2 * S, "T", "A", int(99.9 * PX), 5, 0)
+        e.push(2 * S, "F", "B", int(99.9 * PX), 5, 3)
+        e.push(2 * S, "C", "B", int(99.9 * PX), 5, 3, LAST)
+        e.push(3 * S, "A", "B", 100 * PX, 5, 61, LAST)  # bids re-stack
+        e.push(20 * S, "A", "B", 90 * PX, 1, 62, LAST)
+        rows = feats(drain(e))
+        swept = [r for r in rows if r["sweep_sell_ticks_m"] > 0]
+        assert swept and swept[0]["sweep_net_ticks_m"] == pytest.approx(-1.0)
+        assert max(r["sweep_failure_signed"] for r in rows) > 0.5  # bullish
+        assert rows[-1]["failed_sweep_net_ratio_l"] == pytest.approx(1.0)
+
+    def test_neutral_values_after_windows_drain(self):
+        e = engine()
+        book(e)
+        e.push(30 * S, "A", "B", 90 * PX, 1, 7, LAST)  # quiet row, far away
+        out = feats(drain(e))[-1]
+        # (flow_imbalance_near_s is exempt: the quiet add itself is a new
+        # level inside the near band and legitimately registers as flow)
+        for k in ("flow_imbalance_1_s",
+                  "fill_imbalance_s", "fill_imbalance_m",
+                  "hidden_fill_imbalance_l", "pull_imbalance_m",
+                  "replenish_tilt_m", "depletion_tilt_s",
+                  "sweep_net_ticks_m", "sweep_failure_signed",
+                  "failed_sweep_net_ratio_l"):
+            assert out[k] == pytest.approx(0.0), k
+
+    def test_scale_invariance_3x_volume(self):
+        def scenario(mult: int):
+            e = engine()
+            book(e, sz=30 * mult)
+            e.push(2 * S, "T", "A", 100 * PX, 30 * mult, 0)
+            e.push(2 * S, "F", "B", 100 * PX, 30 * mult, 9001)
+            e.push(2 * S, "C", "B", 100 * PX, 30 * mult, 9001, LAST)
+            e.push(2 * S + 1_000, "A", "B", 100 * PX, 30 * mult, 31, LAST)
+            return feats(drain(e))[-1]
+
+        a, b = scenario(1), scenario(3)
+        for k in ("flow_imbalance_1_s", "flow_imbalance_near_s",
+                  "flow_imbalance_near_m", "fill_imbalance_s",
+                  "fill_imbalance_m", "hidden_fill_imbalance_l",
+                  "pull_imbalance_m", "replenish_tilt_m", "depletion_tilt_s",
+                  "turnover_tilt_m", "book_imbalance_outer", "imbalance_tilt",
+                  "depth_concentration_tilt", "iceberg_asym_l"):
+            assert a[k] == pytest.approx(b[k], abs=1e-12), k
+
+
 class TestOneCodePath:
     def test_step_equals_run_row_by_row(self):
         """Live-style length-1 columns through step() must equal the
